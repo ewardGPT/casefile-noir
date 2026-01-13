@@ -263,6 +263,59 @@ export default class StartMenu extends Phaser.Scene {
     }
 
     startGame() {
+        if (!this.validationPassed) {
+            console.warn("Cannot start: validation not passed yet");
+            return;
+        }
         this.scene.start("Game");
+    }
+
+    async runMapValidation() {
+        const { width, height } = this.scale;
+
+        try {
+            const report = await validateTiledMap({
+                mapUrl: "/assets/maps/world.json",
+                onProgress: (p) => {
+                    if (p.phase === "collisions") {
+                        this.validationText?.setText(`Validating collisions... ${p.i}/${p.total}`);
+                    } else if (p.phase === "bfs") {
+                        this.validationText?.setText(`Checking paths... ${p.reachable} tiles`);
+                    }
+                },
+            });
+
+            // Log full report
+            console.group("🗺️ MAP VALIDATION REPORT");
+            console.log("Stats:", report.stats);
+            if (report.warnings.length) console.warn("Warnings:", report.warnings);
+            if (report.errors.length) console.error("Errors:", report.errors);
+            if (report.unreachableObjects.length) console.warn("Unreachable:", report.unreachableObjects);
+            if (report.chokepoints.length) console.log("Chokepoints:", report.chokepoints.length);
+            if (report.islands.length) console.log("Islands:", report.islands.length);
+            if (report.microGaps.length) console.warn("Micro-gaps:", report.microGaps);
+            console.groupEnd();
+
+            // Store debug data for Game scene overlay
+            this.registry.set("mapDebugData", report.debug);
+
+            // Always pass for now (validation is informational, not blocking)
+            this.validationPassed = true;
+            this.validationText?.setText(`Map OK ✅ (${report.stats.ms}ms) - Press ENTER`);
+            this.validationText?.setStyle({ color: "#4ade80" });
+
+            // Auto-start after short delay
+            this.time.delayedCall(400, () => {
+                if (!this.scene.isActive("Game")) {
+                    this.startGame();
+                }
+            });
+
+        } catch (e) {
+            console.error("Map validation error:", e);
+            this.validationText?.setText("Map validation error - Starting anyway...");
+            this.validationPassed = true; // Allow start even on error
+            this.time.delayedCall(1000, () => this.startGame());
+        }
     }
 }

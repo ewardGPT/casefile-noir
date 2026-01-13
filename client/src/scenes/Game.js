@@ -12,6 +12,8 @@ import {
     setBestScore
 } from '../ui/gameState.js';
 import { checkContradictions } from '../api.js';
+import { MapDebugOverlay } from '../utils/mapDebugOverlay.js';
+
 
 export default class GameScene extends Phaser.Scene {
     constructor() {
@@ -253,6 +255,16 @@ export default class GameScene extends Phaser.Scene {
         // --- 11. NPCs ---
         this.npcs = [];
         this.spawnNPCs();
+
+        // --- 12. Debug Overlay (F2 toggle) ---
+        const debugData = this.registry.get("mapDebugData");
+        if (debugData) {
+            this.mapDebugOverlay = new MapDebugOverlay(this, debugData);
+            this.input.keyboard.on("keydown-F2", () => {
+                this.mapDebugOverlay.toggle();
+            });
+            console.log("🗺️ Debug overlay ready: press F2 to toggle");
+        }
     }
 
     spawnNPCs() {
