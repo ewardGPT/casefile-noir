@@ -1,13 +1,28 @@
 import Phaser from "phaser";
 import { zoomCheck } from "../utils/zoomCheck";
+import { validateTiledMap } from "../utils/mapValidator";
 
 export default class StartMenu extends Phaser.Scene {
     constructor() {
         super("StartMenu");
+        this.validationPassed = false;
     }
 
     create() {
         const { width, height } = this.scale;
+
+        // --- Validation Status UI ---
+        this.validationText = this.add.text(width / 2, height - 70, "Validating map...", {
+            fontFamily: "monospace",
+            fontSize: "16px",
+            color: "#cbd5e1",
+            backgroundColor: "#0b1220",
+            padding: { left: 10, right: 10, top: 6, bottom: 6 },
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+
+        // Run map validation async
+        this.runMapValidation();
+
 
         // --- Animated Map Background ---
         const map = this.make.tilemap({ key: 'city_map' });
