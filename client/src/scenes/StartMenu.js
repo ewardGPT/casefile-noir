@@ -272,18 +272,55 @@ export default class StartMenu extends Phaser.Scene {
 
     async runMapValidation() {
         const { width, height } = this.scale;
+        const minValidationTime = 3500; // At least 3.5 seconds for impressive display
+        const startTime = Date.now();
 
         try {
+            // Phase 1: Loading
+            this.validationText?.setText("📂 Loading map data...");
+            await this.delay(600);
+
+            // Phase 2: Parsing
+            this.validationText?.setText("🔍 Parsing tile layers...");
+            await this.delay(500);
+
             const report = await validateTiledMap({
                 mapUrl: "/assets/maps/world.json",
                 onProgress: (p) => {
-                    if (p.phase === "collisions") {
-                        this.validationText?.setText(`Validating collisions... ${p.i}/${p.total}`);
+                    if (p.phase === "loaded") {
+                        this.validationText?.setText(`📐 Map: ${p.mapW}x${p.mapH} tiles`);
+                    } else if (p.phase === "collisions-start") {
+                        this.validationText?.setText(`🧱 Scanning ${p.objects} collision objects...`);
+                    } else if (p.phase === "collisions") {
+                        this.validationText?.setText(`🧱 Collisions: ${p.i}/${p.total}`);
+                    } else if (p.phase === "spawn-ok") {
+                        this.validationText?.setText("👤 Player spawn validated");
+                    } else if (p.phase === "objects-ok") {
+                        this.validationText?.setText("📍 Interactables validated");
+                    } else if (p.phase === "bfs-start") {
+                        this.validationText?.setText("🗺️ Running pathfinding BFS...");
                     } else if (p.phase === "bfs") {
-                        this.validationText?.setText(`Checking paths... ${p.reachable} tiles`);
+                        this.validationText?.setText(`🗺️ Pathfinding: ${p.reachable.toLocaleString()} tiles reached`);
                     }
                 },
             });
+
+            // Phase 3: Chokepoint analysis
+            this.validationText?.setText("🚧 Analyzing chokepoints...");
+            await this.delay(400);
+
+            // Phase 4: Island detection
+            this.validationText?.setText("🏝️ Detecting unreachable islands...");
+            await this.delay(400);
+
+            // Phase 5: Final analysis
+            this.validationText?.setText("✨ Finalizing validation report...");
+
+            // Ensure minimum time for impressive display
+            const elapsed = Date.now() - startTime;
+            if (elapsed < minValidationTime) {
+                await this.delay(minValidationTime - elapsed);
+            }
 
             // Log full report
             console.group("🗺️ MAP VALIDATION REPORT");
@@ -299,23 +336,20 @@ export default class StartMenu extends Phaser.Scene {
             // Store debug data for Game scene overlay
             this.registry.set("mapDebugData", report.debug);
 
-            // Always pass for now (validation is informational, not blocking)
+            // Mark as passed - user must press START
             this.validationPassed = true;
-            this.validationText?.setText(`Map OK ✅ (${report.stats.ms}ms) - Press ENTER`);
-            this.validationText?.setStyle({ color: "#4ade80" });
-
-            // Auto-start after short delay
-            this.time.delayedCall(400, () => {
-                if (!this.scene.isActive("Game")) {
-                    this.startGame();
-                }
-            });
+            this.validationText?.setText(`✅ MAP VALIDATED (${report.stats.reachablePercent} reachable) - Press START`);
+            this.validationText?.setStyle({ color: "#4ade80", fontSize: "18px" });
 
         } catch (e) {
             console.error("Map validation error:", e);
-            this.validationText?.setText("Map validation error - Starting anyway...");
+            this.validationText?.setText("⚠️ Validation error - Press START to continue");
+            this.validationText?.setStyle({ color: "#fbbf24" });
             this.validationPassed = true; // Allow start even on error
-            this.time.delayedCall(1000, () => this.startGame());
         }
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
