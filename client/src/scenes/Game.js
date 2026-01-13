@@ -13,6 +13,7 @@ import {
 } from '../ui/gameState.js';
 import { checkContradictions } from '../api.js';
 import { MapDebugOverlay } from '../utils/mapDebugOverlay.js';
+import { AStarPathfinder } from '../utils/astarPathfinding.js';
 
 
 export default class GameScene extends Phaser.Scene {
@@ -277,13 +278,9 @@ export default class GameScene extends Phaser.Scene {
 
             // Initialize A* pathfinder for NPCs
             if (debugData.blocked && debugData.mapW && debugData.mapH) {
-                this.pathfinder = {
-                    blocked: debugData.blocked,
-                    mapW: debugData.mapW,
-                    mapH: debugData.mapH,
-                    tw: debugData.tw,
-                    th: debugData.th
-                };
+                this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
+                this.mapTileWidth = debugData.tw;
+                this.mapTileHeight = debugData.th;
             }
 
             for (const spawn of validatedSpawns) {
@@ -297,9 +294,10 @@ export default class GameScene extends Phaser.Scene {
                 // Use pre-validated waypoints
                 npc.npcKey = spawn.npcType;
                 npc.waypoints = spawn.waypoints.map(wp => ({ x: wp.x, y: wp.y }));
-                npc.currentWaypoint = 0;
+                npc.currentWaypointIndex = 0;
+                npc.activePath = null;
                 npc.direction = 'down';
-                npc.speed = Phaser.Math.Between(25, 45);
+                npc.speed = Phaser.Math.Between(40, 60);
                 npc.pauseTime = Phaser.Math.Between(500, 2000);
 
                 // Track for stuck detection
@@ -316,8 +314,9 @@ export default class GameScene extends Phaser.Scene {
 
                 // Freeze collision with player
                 this.physics.add.overlap(npc, this.player, () => {
-                    npc.pauseTime = 500;
+                    npc.pauseTime = 1000;
                     npc.setVelocity(0);
+                    npc.activePath = null;
                 });
 
                 this.npcs.push(npc);
@@ -384,76 +383,97 @@ export default class GameScene extends Phaser.Scene {
     }
 
     updateNPCs(delta) {
+        if (!this.astar || !this.mapTileWidth) return;
+
         this.npcs.forEach(npc => {
             // Handle pause/freeze
             if (npc.pauseTime > 0) {
                 npc.pauseTime -= delta;
+                npc.setVelocity(0);
                 npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
                 return;
             }
 
-            // Get current target waypoint
-            const target = npc.waypoints[npc.currentWaypoint];
-            const dx = target.x - npc.x;
-            const dy = target.y - npc.y;
+            // If no active path, calculate one to current waypoint
+            if (!npc.activePath || npc.activePath.length === 0) {
+                const target = npc.waypoints[npc.currentWaypointIndex || 0];
+
+                // Convert to tiles
+                const startTx = npc.x / this.mapTileWidth;
+                const startTy = npc.y / this.mapTileHeight;
+                const targetTx = target.x / this.mapTileWidth;
+                const targetTy = target.y / this.mapTileHeight;
+
+                // Calculate A* path
+                const path = this.astar.findPath(startTx, startTy, targetTx, targetTy);
+
+                if (path && path.length > 0) {
+                    npc.activePath = path;
+                    // Remove first node if it's the current tile
+                    if (path.length > 1) npc.activePath.shift();
+                } else {
+                    // Path failed? Skip to next waypoint or wait
+                    npc.pauseTime = 2000;
+                    npc.currentWaypointIndex = (npc.currentWaypointIndex + 1) % npc.waypoints.length;
+                    return;
+                }
+            }
+
+            // Follow current path node
+            const nextNode = npc.activePath[0];
+            const targetX = (nextNode.x + 0.5) * this.mapTileWidth;
+            const targetY = (nextNode.y + 0.5) * this.mapTileHeight; // Target center of tile
+
+            const dx = targetX - npc.x;
+            const dy = targetY - npc.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // Track if NPC is stuck (velocity near zero but should be moving)
-            if (!npc.lastPos) npc.lastPos = { x: npc.x, y: npc.y };
-            if (!npc.stuckCounter) npc.stuckCounter = 0;
+            if (dist < 5) {
+                // Reached node
+                npc.activePath.shift();
+                if (npc.activePath.length === 0) {
+                    // Reached final destination (waypoint)
+                    npc.pauseTime = Phaser.Math.Between(1000, 3000);
+                    npc.currentWaypointIndex = (npc.currentWaypointIndex + 1) % npc.waypoints.length;
+                    npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
+                    npc.setVelocity(0);
+                }
+                return;
+            }
 
-            const moved = Math.abs(npc.x - npc.lastPos.x) + Math.abs(npc.y - npc.lastPos.y);
-            npc.lastPos = { x: npc.x, y: npc.y };
+            // Move towards node
+            const angle = Math.atan2(dy, dx);
+            const speed = npc.speed || 40;
 
-            if (dist < 15) {
-                // Reached waypoint, pause then move to next
-                npc.setVelocity(0);
-                npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
-                npc.pauseTime = Phaser.Math.Between(800, 2000);
-                npc.currentWaypoint = (npc.currentWaypoint + 1) % npc.waypoints.length;
-                npc.stuckCounter = 0;
-            } else if (moved < 0.5 && dist > 15) {
-                // NPC is stuck! Try to navigate around
-                npc.stuckCounter++;
+            npc.setVelocity(
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed
+            );
 
-                if (npc.stuckCounter > 30) {
-                    // Been stuck too long, try alternate movement
-                    const avoidAngles = [Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
-                    const baseAngle = Math.atan2(dy, dx);
-                    const avoidAngle = baseAngle + avoidAngles[npc.stuckCounter % 4];
+            // Update animation direction
+            if (Math.abs(dx) > Math.abs(dy)) {
+                npc.direction = dx > 0 ? 'right' : 'left';
+            } else {
+                npc.direction = dy > 0 ? 'down' : 'up';
+            }
+            npc.anims.play(`${npc.npcKey}-walk-${npc.direction}`, true);
 
-                    npc.setVelocity(
-                        Math.cos(avoidAngle) * npc.speed * 1.2,
-                        Math.sin(avoidAngle) * npc.speed * 1.2
-                    );
-
-                    // If stuck for too long, skip to next waypoint
-                    if (npc.stuckCounter > 120) {
-                        npc.currentWaypoint = (npc.currentWaypoint + 1) % npc.waypoints.length;
-                        npc.stuckCounter = 0;
-                    }
+            // Stuck detection
+            if (Math.abs(npc.x - npc.lastX) < 0.5 && Math.abs(npc.y - npc.lastY) < 0.5) {
+                npc.stuckFrames++;
+                if (npc.stuckFrames > 60) {
+                    // Stuck for 1 second? Recalculate path
+                    npc.activePath = null;
+                    npc.stuckFrames = 0;
+                    // Push slightly to unstuck
+                    npc.x += (Math.random() - 0.5) * 10;
+                    npc.y += (Math.random() - 0.5) * 10;
                 }
             } else {
-                // Normal movement toward waypoint
-                npc.stuckCounter = 0;
-                const angle = Math.atan2(dy, dx);
-                npc.setVelocity(Math.cos(angle) * npc.speed, Math.sin(angle) * npc.speed);
+                npc.stuckFrames = 0;
             }
-
-            // Determine direction for animation based on velocity
-            const vx = npc.body.velocity.x;
-            const vy = npc.body.velocity.y;
-            if (Math.abs(vx) > Math.abs(vy)) {
-                npc.direction = vx > 0 ? 'right' : 'left';
-            } else if (Math.abs(vy) > 0.1) {
-                npc.direction = vy > 0 ? 'down' : 'up';
-            }
-
-            if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
-                npc.anims.play(`${npc.npcKey}-walk-${npc.direction}`, true);
-            } else {
-                npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
-            }
+            npc.lastX = npc.x;
+            npc.lastY = npc.y;
         });
     }
 
