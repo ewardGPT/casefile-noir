@@ -405,6 +405,84 @@ export async function validateTiledMap({
     report.stats.chokepoints = chokepoints.length;
     report.chokepoints = chokepoints.slice(0, perf.maxChokepointsToReport);
 
+    onProgress?.({ phase: "npc-validation" });
+
+    // ---------- NPC Spawn Validation ----------
+    // Pre-compute valid spawn positions for NPCs across the map
+    const npcSpawnZones = [
+        { x: 100, y: 100, width: 600, height: 600 },     // NW corner
+        { x: 3400, y: 100, width: 600, height: 600 },    // NE corner
+        { x: 100, y: 3400, width: 600, height: 600 },    // SW corner
+        { x: 3400, y: 3400, width: 600, height: 600 },   // SE corner
+        { x: 1800, y: 1800, width: 500, height: 500 },   // Center
+        { x: 1000, y: 2500, width: 500, height: 500 },   // West-South
+        { x: 2500, y: 1000, width: 500, height: 500 },   // East-North
+        { x: 500, y: 2000, width: 400, height: 400 },    // West-Mid
+        { x: 3000, y: 2000, width: 400, height: 400 },   // East-Mid
+    ];
+
+    const validatedNPCSpawns = [];
+    const npcCount = 15; // Target NPC count
+
+    for (let i = 0; i < npcCount; i++) {
+        const zone = npcSpawnZones[i % npcSpawnZones.length];
+
+        // Try multiple positions until we find one that's walkable AND reachable
+        let found = false;
+        for (let attempt = 0; attempt < 50; attempt++) {
+            const spawnX = zone.x + Math.floor(Math.random() * zone.width);
+            const spawnY = zone.y + Math.floor(Math.random() * zone.height);
+
+            const tileX = Math.floor(spawnX / tw);
+            const tileY = Math.floor(spawnY / th);
+
+            if (tileX >= 0 && tileY >= 0 && tileX < mapW && tileY < mapH) {
+                const idx = tileY * mapW + tileX;
+                if (!blocked[idx] && visited[idx]) {
+                    // Generate random waypoints that are also reachable
+                    const waypoints = [];
+                    for (let w = 0; w < 4; w++) {
+                        const wpZone = npcSpawnZones[(i + w + 1) % npcSpawnZones.length];
+                        for (let wpAttempt = 0; wpAttempt < 30; wpAttempt++) {
+                            const wpX = wpZone.x + Math.floor(Math.random() * wpZone.width);
+                            const wpY = wpZone.y + Math.floor(Math.random() * wpZone.height);
+                            const wpTileX = Math.floor(wpX / tw);
+                            const wpTileY = Math.floor(wpY / th);
+
+                            if (wpTileX >= 0 && wpTileY >= 0 && wpTileX < mapW && wpTileY < mapH) {
+                                const wpIdx = wpTileY * mapW + wpTileX;
+                                if (!blocked[wpIdx] && visited[wpIdx]) {
+                                    waypoints.push({ x: wpX, y: wpY, tileX: wpTileX, tileY: wpTileY });
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (waypoints.length >= 2) {
+                        validatedNPCSpawns.push({
+                            x: spawnX,
+                            y: spawnY,
+                            tileX,
+                            tileY,
+                            waypoints,
+                            npcType: `npc_${(i % 35) + 1}` // Cycle through 35 NPC types
+                        });
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!found) {
+            report.warnings.push(`NPC ${i}: Could not find valid spawn in zone ${i % npcSpawnZones.length}`);
+        }
+    }
+
+    report.stats.npcSpawnsValidated = validatedNPCSpawns.length;
+    report.stats.npcSpawnsFailed = npcCount - validatedNPCSpawns.length;
+
     // ---------- Final ----------
     report.stats.ms = Math.round(performance.now() - t0);
 
@@ -418,6 +496,7 @@ export async function validateTiledMap({
         islandMark,
         microGapTiles,
         chokepoints,
+        validatedNPCSpawns, // Pre-validated NPC positions for Game scene
     };
 
     onProgress?.({ phase: "done", report });

@@ -272,17 +272,17 @@ export default class StartMenu extends Phaser.Scene {
 
     async runMapValidation() {
         const { width, height } = this.scale;
-        const minValidationTime = 3500; // At least 3.5 seconds for impressive display
+        const minValidationTime = 10000; // At least 10 seconds for impressive display
         const startTime = Date.now();
 
         try {
             // Phase 1: Loading
             this.validationText?.setText("📂 Loading map data...");
-            await this.delay(600);
+            await this.delay(1500);
 
             // Phase 2: Parsing
             this.validationText?.setText("🔍 Parsing tile layers...");
-            await this.delay(500);
+            await this.delay(1500);
 
             const report = await validateTiledMap({
                 mapUrl: "/assets/maps/world.json",
@@ -299,21 +299,29 @@ export default class StartMenu extends Phaser.Scene {
                         this.validationText?.setText("📍 Interactables validated");
                     } else if (p.phase === "bfs-start") {
                         this.validationText?.setText("🗺️ Running pathfinding BFS...");
-                    } else if (p.phase === "bfs") {
-                        this.validationText?.setText(`🗺️ Pathfinding: ${p.reachable.toLocaleString()} tiles reached`);
+                    } else if (p.phase === "npc-validation") {
+                        this.validationText?.setText("� Validating NPC spawn positions...");
                     }
                 },
             });
 
             // Phase 3: Chokepoint analysis
             this.validationText?.setText("🚧 Analyzing chokepoints...");
-            await this.delay(400);
+            await this.delay(1500);
 
             // Phase 4: Island detection
             this.validationText?.setText("🏝️ Detecting unreachable islands...");
-            await this.delay(400);
+            await this.delay(1500);
 
-            // Phase 5: Final analysis
+            // Phase 5: NPC validation
+            this.validationText?.setText("👥 Pre-computing NPC spawn positions...");
+            await this.delay(1500);
+
+            // Phase 6: A* pathfinding init
+            this.validationText?.setText("🛤️ Initializing A* pathfinding grid...");
+            await this.delay(1000);
+
+            // Phase 7: Final analysis
             this.validationText?.setText("✨ Finalizing validation report...");
 
             // Ensure minimum time for impressive display

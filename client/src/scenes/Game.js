@@ -268,39 +268,87 @@ export default class GameScene extends Phaser.Scene {
     }
 
     spawnNPCs() {
-        // NPC types available (all 35 NPC sprites)
+        // Get pre-validated NPC spawns from map validator
+        const debugData = this.registry.get("mapDebugData");
+        const validatedSpawns = debugData?.validatedNPCSpawns;
+
+        if (validatedSpawns && validatedSpawns.length > 0) {
+            console.log(`Using ${validatedSpawns.length} pre-validated NPC spawns`);
+
+            // Initialize A* pathfinder for NPCs
+            if (debugData.blocked && debugData.mapW && debugData.mapH) {
+                this.pathfinder = {
+                    blocked: debugData.blocked,
+                    mapW: debugData.mapW,
+                    mapH: debugData.mapH,
+                    tw: debugData.tw,
+                    th: debugData.th
+                };
+            }
+
+            for (const spawn of validatedSpawns) {
+                const npc = this.physics.add.sprite(spawn.x, spawn.y, spawn.npcType);
+                npc.setScale(1.0);
+                npc.body.setSize(32, 24);
+                npc.body.setOffset(16, 40);
+                npc.setDepth(9);
+                npc.setCollideWorldBounds(true);
+
+                // Use pre-validated waypoints
+                npc.npcKey = spawn.npcType;
+                npc.waypoints = spawn.waypoints.map(wp => ({ x: wp.x, y: wp.y }));
+                npc.currentWaypoint = 0;
+                npc.direction = 'down';
+                npc.speed = Phaser.Math.Between(25, 45);
+                npc.pauseTime = Phaser.Math.Between(500, 2000);
+
+                // Track for stuck detection
+                npc.lastX = spawn.x;
+                npc.lastY = spawn.y;
+                npc.stuckFrames = 0;
+
+                // Collide with buildings
+                Object.keys(this.layers).forEach(key => {
+                    if (key.startsWith('Bldg')) {
+                        this.physics.add.collider(npc, this.layers[key]);
+                    }
+                });
+
+                // Freeze collision with player
+                this.physics.add.overlap(npc, this.player, () => {
+                    npc.pauseTime = 500;
+                    npc.setVelocity(0);
+                });
+
+                this.npcs.push(npc);
+            }
+
+            console.log(`✅ Spawned ${this.npcs.length} NPCs with validated positions`);
+        } else {
+            // Fallback: spawn with basic random positions
+            console.warn("No pre-validated NPC spawns found, using fallback");
+            this.spawnNPCsFallback();
+        }
+    }
+
+    spawnNPCsFallback() {
+        // Fallback NPC spawning (original method)
         const npcTypes = [];
         for (let i = 1; i <= 35; i++) {
             npcTypes.push(`npc_${i}`);
         }
 
-        // Map is 4096x4096 - spread NPCs across the entire map
-        const mapWidth = 4096;
-        const mapHeight = 4096;
-
-        // Spawn zones across the entire map (far apart from each other)
         const spawnZones = [
-            { x: 100, y: 100, width: 600, height: 600 },     // NW corner
-            { x: 3400, y: 100, width: 600, height: 600 },    // NE corner
-            { x: 100, y: 3400, width: 600, height: 600 },    // SW corner
-            { x: 3400, y: 3400, width: 600, height: 600 },   // SE corner
-            { x: 1800, y: 1800, width: 500, height: 500 },   // Center
-            { x: 1000, y: 2500, width: 500, height: 500 },   // West-South
-            { x: 2500, y: 1000, width: 500, height: 500 },   // East-North
-            { x: 500, y: 2000, width: 400, height: 400 },    // West-Mid
-            { x: 3000, y: 2000, width: 400, height: 400 },   // East-Mid
+            { x: 1800, y: 1800, width: 500, height: 500 },
+            { x: 1500, y: 1500, width: 400, height: 400 },
         ];
 
-        // Spawn 15 NPCs spread across the map (using random types from 35)
-        const npcCount = 15;
+        const npcCount = 5;
 
         for (let i = 0; i < npcCount; i++) {
-            // Each NPC spawns in a DIFFERENT zone (spread out)
             const zone = spawnZones[i % spawnZones.length];
             const spawnX = zone.x + Phaser.Math.Between(50, zone.width - 50);
             const spawnY = zone.y + Phaser.Math.Between(50, zone.height - 50);
-
-            // Pick NPC type
             const npcKey = npcTypes[i % npcTypes.length];
 
             const npc = this.physics.add.sprite(spawnX, spawnY, npcKey);
@@ -309,35 +357,22 @@ export default class GameScene extends Phaser.Scene {
             npc.body.setOffset(16, 40);
             npc.setDepth(9);
             npc.setCollideWorldBounds(true);
-
-            // Generate waypoints that span across the map (long walks)
-            const waypointCount = Phaser.Math.Between(4, 6);
-            const waypoints = [];
-            for (let w = 0; w < waypointCount; w++) {
-                // Pick a random zone for each waypoint (creates long journeys)
-                const wZone = Phaser.Utils.Array.GetRandom(spawnZones);
-                waypoints.push({
-                    x: wZone.x + Phaser.Math.Between(50, wZone.width - 50),
-                    y: wZone.y + Phaser.Math.Between(50, wZone.height - 50)
-                });
-            }
-
-            // NPC patrol data
             npc.npcKey = npcKey;
-            npc.waypoints = waypoints;
+            npc.waypoints = [{ x: spawnX + 100, y: spawnY }, { x: spawnX, y: spawnY + 100 }];
             npc.currentWaypoint = 0;
             npc.direction = 'down';
-            npc.speed = Phaser.Math.Between(25, 45);
-            npc.pauseTime = Phaser.Math.Between(500, 2000);
+            npc.speed = 30;
+            npc.pauseTime = 1000;
+            npc.lastX = spawnX;
+            npc.lastY = spawnY;
+            npc.stuckFrames = 0;
 
-            // Collide with buildings and trees
             Object.keys(this.layers).forEach(key => {
                 if (key.startsWith('Bldg')) {
                     this.physics.add.collider(npc, this.layers[key]);
                 }
             });
 
-            // Freeze collision with player (overlap, not push)
             this.physics.add.overlap(npc, this.player, () => {
                 npc.pauseTime = 500;
                 npc.setVelocity(0);
@@ -345,8 +380,7 @@ export default class GameScene extends Phaser.Scene {
 
             this.npcs.push(npc);
         }
-
-        console.log(`Spawned ${npcCount} NPCs`);
+        console.log(`Spawned ${npcCount} NPCs (fallback mode)`);
     }
 
     updateNPCs(delta) {
