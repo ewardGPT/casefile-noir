@@ -1,0 +1,110 @@
+{
+    "compressionlevel": -1,
+    "height": 60,
+    "infinite": false,
+    "layers": [
+        {
+            "id": 2,
+            "image": "../map.png",
+            "name": "Background",
+            "opacity": 1,
+            "type": "imagelayer",
+            "visible": true,
+            "x": 0,
+            "y": 0
+        },
+        {
+            "draworder": "topdown",
+            "id": 3,
+            "name": "Collisions",
+            "objects": [
+                {
+                    "height": 200,
+                    "id": 1,
+                    "name": "",
+                    "rotation": 0,
+                    "type": "",
+                    "visible": true,
+                    "width": 400,
+                    "x": 1100,
+                    "y": 850
+                }
+            ],
+            "opacity": 1,
+            "type": "objectgroup",
+            "visible": true,
+            "x": 0,
+            "y": 0
+        },
+        {
+            "draworder": "topdown",
+            "id": 4,
+            "name": "Entities",
+            "objects": [
+                {
+                    "height": 0,
+                    "id": 2,
+                    "name": "Player",
+                    "point": true,
+                    "rotation": 0,
+                    "type": "",
+                    "visible": true,
+                    "width": 0,
+                    "x": 1100,
+                    "y": 1050
+                }
+            ],
+            "opacity": 1,
+            "type": "objectgroup",
+            "visible": true,
+            "x": 0,
+            "y": 0
+        },
+        {
+            "draworder": "topdown",
+            "id": 5,
+            "name": "Interactables",
+            "objects": [
+                {
+                    "height": 64,
+                    "id": 3,
+                    "name": "desk",
+                    "rotation": 0,
+                    "type": "",
+                    "visible": true,
+                    "width": 96,
+                    "x": 1150,
+                    "y": 920,
+                    "properties": [
+                        {
+                            "name": "kind",
+                            "type": "string",
+                            "value": "evidence"
+                        },
+                        {
+                            "name": "evidenceId",
+                            "type": "string",
+                            "value": "desk_receipt"
+                        }
+                    ]
+                }
+            ],
+            "opacity": 1,
+            "type": "objectgroup",
+            "visible": true,
+            "x": 0,
+            "y": 0
+        }
+    ],
+    "nextlayerid": 6,
+    "nextobjectid": 4,
+    "orientation": "orthogonal",
+    "renderorder": "right-down",
+    "tiledversion": "1.10.2",
+    "tileheight": 32,
+    "tilesets": [],
+    "tilewidth": 32,
+    "type": "map",
+    "version": "1.10",
+    "width": 105
+}

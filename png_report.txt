@@ -1,0 +1,16 @@
+Checking images in client/public/assets/maps/victorian...
+bricks.png: 1024x2048 - OK
+container.png: 512x2048 - OK
+food.png: 1024x1024 - OK
+roofs.png: 2048x2048 - OK
+terrain-map-v8.png: 512x31488 - CRITICAL (>8192)
+trees-green.png: 1024x1024 - OK
+victorian-accessories.png: 1024x2560 - OK
+victorian-garden.png: 512x2048 - OK
+victorian-mansion.png: 1024x2048 - OK
+victorian-market.png: 512x2560 - OK
+victorian-preview.png: 4096x4096 - OK
+victorian-streets.png: 512x3072 - OK
+victorian-tenement.png: 1024x3072 - OK
+victorian-windows-doors.png: 1024x5120 - WARNING (>4096)
+windows-doors.png: 1024x1024 - OK

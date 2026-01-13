@@ -1,0 +1,10 @@
+[
+  {
+    "key": "collision",
+    "path": "assets/tilesets_json/collision.json"
+  },
+  {
+    "key": "demo_tileset",
+    "path": "assets/tilesets_json/demo_tileset.json"
+  }
+]

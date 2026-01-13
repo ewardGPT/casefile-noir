@@ -1,0 +1,10 @@
+{
+    "name": "demo_tileset",
+    "image": "demo_tiles.png",
+    "tileWidth": 32,
+    "tileHeight": 32,
+    "columns": 32,
+    "tileCount": 1024,
+    "spacing": 0,
+    "margin": 0
+}
