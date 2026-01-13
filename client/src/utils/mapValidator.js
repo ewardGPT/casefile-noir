@@ -229,7 +229,10 @@ export async function validateTiledMap({
                 // Block anything that sounds like a distinct obstacle layer
                 // "Bldg" = Buildings, "Wall" = Walls, "Deco"/"Prop"/"Plant" = Obstacles
                 if (name.startsWith("Bldg") || name.startsWith("Wall") ||
-                    name.startsWith("Deco") || name.startsWith("Prop") || name.startsWith("Plant") || name.startsWith("Tree")) {
+                    name.startsWith("Deco") || name.startsWith("Prop") ||
+                    name.startsWith("Plant") || name.startsWith("Tree") ||
+                    name.startsWith("Roof") || name.startsWith("Structure") ||
+                    name.startsWith("Object") || name.startsWith("Detail")) {
 
                     for (let i = 0; i < layer.data.length; i++) {
                         // If tile ID is non-zero, it exists
