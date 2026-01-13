@@ -36,8 +36,8 @@ export default class Boot extends Phaser.Scene {
         this.load.image('food', path + 'food.png');
         this.load.image('trees', path + 'trees-green.png');
 
-        // Load the new detective spritesheet (32x32 frames, 5 rows)
-        this.load.spritesheet('detective', 'assets/sprites/characters/detective.png', { frameWidth: 96, frameHeight: 96 });
+        // Load the detective spritesheet (now 64x64 frames to match NPCs)
+        this.load.spritesheet('detective', 'assets/sprites/characters/detective.png', { frameWidth: 64, frameHeight: 64 });
 
         // Load NPC spritesheets (4x4 grid, 64x64 frames based on 256x256 image)
         for (let i = 1; i <= 5; i++) {
