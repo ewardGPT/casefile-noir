@@ -79,7 +79,8 @@ export default class GameScene extends Phaser.Scene {
                 const layer = map.createLayer(name, tilesets, 0, 0);
                 if (layer) {
                     this.layers[name] = layer;
-                    if (name.startsWith('Bldg')) {
+                    // Enable collision for buildings and trees (Trn_3)
+                    if (name.startsWith('Bldg') || name === 'Trn_3') {
                         layer.setCollisionByExclusion([-1]);
                         console.log(`Game.create: Enabled collision for ${name}`);
                     }
@@ -121,9 +122,9 @@ export default class GameScene extends Phaser.Scene {
         this.player.setDepth(10);
         this.lastDirection = 'down'; // Track direction for idle
 
-        // Collide with all building layers
+        // Collide with all building layers AND terrain layer 3 (trees)
         Object.keys(this.layers).forEach(key => {
-            if (key.startsWith('Bldg')) {
+            if (key.startsWith('Bldg') || key === 'Trn_3') {
                 this.physics.add.collider(this.player, this.layers[key]);
             }
         });
@@ -255,48 +256,80 @@ export default class GameScene extends Phaser.Scene {
     }
 
     spawnNPCs() {
-        // Define patrol routes for NPCs (one of each type, no duplicates)
-        const npcRoutes = [
-            { type: 1, waypoints: [{ x: 300, y: 350 }, { x: 500, y: 350 }, { x: 500, y: 500 }, { x: 300, y: 500 }] },
-            { type: 2, waypoints: [{ x: 400, y: 300 }, { x: 600, y: 300 }, { x: 600, y: 450 }, { x: 400, y: 450 }] },
-            { type: 3, waypoints: [{ x: 250, y: 400 }, { x: 250, y: 550 }, { x: 450, y: 550 }, { x: 450, y: 400 }] },
-            { type: 4, waypoints: [{ x: 550, y: 350 }, { x: 700, y: 350 }, { x: 700, y: 500 }, { x: 550, y: 500 }] },
-            { type: 5, waypoints: [{ x: 350, y: 250 }, { x: 500, y: 250 }, { x: 500, y: 400 }, { x: 350, y: 400 }] },
+        // NPC types available (add more keys here when user adds more sprites)
+        const npcTypes = ['npc_1', 'npc_2', 'npc_3', 'npc_4', 'npc_5'];
+
+        // Map is 4096x4096 - spread NPCs across the entire map
+        const mapWidth = 4096;
+        const mapHeight = 4096;
+
+        // Spawn zones across the entire map (far apart from each other)
+        const spawnZones = [
+            { x: 100, y: 100, width: 600, height: 600 },     // NW corner
+            { x: 3400, y: 100, width: 600, height: 600 },    // NE corner
+            { x: 100, y: 3400, width: 600, height: 600 },    // SW corner
+            { x: 3400, y: 3400, width: 600, height: 600 },   // SE corner
+            { x: 1800, y: 1800, width: 500, height: 500 },   // Center
+            { x: 1000, y: 2500, width: 500, height: 500 },   // West-South
+            { x: 2500, y: 1000, width: 500, height: 500 },   // East-North
         ];
 
-        npcRoutes.forEach((route, idx) => {
-            const npcKey = `npc_${route.type}`;
-            const startPos = route.waypoints[0];
-            const npc = this.physics.add.sprite(startPos.x, startPos.y, npcKey);
+        // Sparse NPC count - only 5 across the whole map
+        const npcCount = 5;
+
+        for (let i = 0; i < npcCount; i++) {
+            // Each NPC spawns in a DIFFERENT zone (spread out)
+            const zone = spawnZones[i % spawnZones.length];
+            const spawnX = zone.x + Phaser.Math.Between(50, zone.width - 50);
+            const spawnY = zone.y + Phaser.Math.Between(50, zone.height - 50);
+
+            // Pick NPC type
+            const npcKey = npcTypes[i % npcTypes.length];
+
+            const npc = this.physics.add.sprite(spawnX, spawnY, npcKey);
             npc.setScale(1.0);
             npc.body.setSize(32, 24);
             npc.body.setOffset(16, 40);
             npc.setDepth(9);
             npc.setCollideWorldBounds(true);
 
+            // Generate waypoints that span across the map (long walks)
+            const waypointCount = Phaser.Math.Between(4, 6);
+            const waypoints = [];
+            for (let w = 0; w < waypointCount; w++) {
+                // Pick a random zone for each waypoint (creates long journeys)
+                const wZone = Phaser.Utils.Array.GetRandom(spawnZones);
+                waypoints.push({
+                    x: wZone.x + Phaser.Math.Between(50, wZone.width - 50),
+                    y: wZone.y + Phaser.Math.Between(50, wZone.height - 50)
+                });
+            }
+
             // NPC patrol data
             npc.npcKey = npcKey;
-            npc.waypoints = route.waypoints;
+            npc.waypoints = waypoints;
             npc.currentWaypoint = 0;
             npc.direction = 'down';
-            npc.speed = 35;
-            npc.pauseTime = 0;
+            npc.speed = Phaser.Math.Between(25, 45);
+            npc.pauseTime = Phaser.Math.Between(500, 2000);
 
-            // Collide with buildings only
+            // Collide with buildings and trees
             Object.keys(this.layers).forEach(key => {
-                if (key.startsWith('Bldg')) {
+                if (key.startsWith('Bldg') || key === 'Trn_3') {
                     this.physics.add.collider(npc, this.layers[key]);
                 }
             });
 
             // Freeze collision with player (overlap, not push)
             this.physics.add.overlap(npc, this.player, () => {
-                npc.pauseTime = 500; // Freeze NPC briefly when touched
+                npc.pauseTime = 500;
                 npc.setVelocity(0);
             });
 
             this.npcs.push(npc);
-        });
+        }
+
+        console.log(`Spawned ${npcCount} NPCs`);
     }
 
     updateNPCs(delta) {
@@ -314,24 +347,61 @@ export default class GameScene extends Phaser.Scene {
             const dy = target.y - npc.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (dist < 10) {
+            // Track if NPC is stuck (velocity near zero but should be moving)
+            if (!npc.lastPos) npc.lastPos = { x: npc.x, y: npc.y };
+            if (!npc.stuckCounter) npc.stuckCounter = 0;
+
+            const moved = Math.abs(npc.x - npc.lastPos.x) + Math.abs(npc.y - npc.lastPos.y);
+            npc.lastPos = { x: npc.x, y: npc.y };
+
+            if (dist < 15) {
                 // Reached waypoint, pause then move to next
                 npc.setVelocity(0);
                 npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
                 npc.pauseTime = Phaser.Math.Between(800, 2000);
                 npc.currentWaypoint = (npc.currentWaypoint + 1) % npc.waypoints.length;
+                npc.stuckCounter = 0;
+            } else if (moved < 0.5 && dist > 15) {
+                // NPC is stuck! Try to navigate around
+                npc.stuckCounter++;
+
+                if (npc.stuckCounter > 30) {
+                    // Been stuck too long, try alternate movement
+                    const avoidAngles = [Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
+                    const baseAngle = Math.atan2(dy, dx);
+                    const avoidAngle = baseAngle + avoidAngles[npc.stuckCounter % 4];
+
+                    npc.setVelocity(
+                        Math.cos(avoidAngle) * npc.speed * 1.2,
+                        Math.sin(avoidAngle) * npc.speed * 1.2
+                    );
+
+                    // If stuck for too long, skip to next waypoint
+                    if (npc.stuckCounter > 120) {
+                        npc.currentWaypoint = (npc.currentWaypoint + 1) % npc.waypoints.length;
+                        npc.stuckCounter = 0;
+                    }
+                }
             } else {
-                // Move toward waypoint
+                // Normal movement toward waypoint
+                npc.stuckCounter = 0;
                 const angle = Math.atan2(dy, dx);
                 npc.setVelocity(Math.cos(angle) * npc.speed, Math.sin(angle) * npc.speed);
+            }
 
-                // Determine direction for animation
-                if (Math.abs(dx) > Math.abs(dy)) {
-                    npc.direction = dx > 0 ? 'right' : 'left';
-                } else {
-                    npc.direction = dy > 0 ? 'down' : 'up';
-                }
+            // Determine direction for animation based on velocity
+            const vx = npc.body.velocity.x;
+            const vy = npc.body.velocity.y;
+            if (Math.abs(vx) > Math.abs(vy)) {
+                npc.direction = vx > 0 ? 'right' : 'left';
+            } else if (Math.abs(vy) > 0.1) {
+                npc.direction = vy > 0 ? 'down' : 'up';
+            }
+
+            if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
                 npc.anims.play(`${npc.npcKey}-walk-${npc.direction}`, true);
+            } else {
+                npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
             }
         });
     }
@@ -375,7 +445,10 @@ export default class GameScene extends Phaser.Scene {
 
         // Movement
         this.player.setVelocity(0);
-        const speed = 180;
+        const baseSpeed = 180;
+        const sprintMultiplier = 1.8;
+        const isSprinting = this.cursors.shift.isDown;
+        const speed = isSprinting ? baseSpeed * sprintMultiplier : baseSpeed;
         let moving = false;
 
         if (this.cursors.left.isDown || this.wasd.A.isDown) {
