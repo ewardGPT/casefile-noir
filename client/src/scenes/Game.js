@@ -79,8 +79,8 @@ export default class GameScene extends Phaser.Scene {
                 const layer = map.createLayer(name, tilesets, 0, 0);
                 if (layer) {
                     this.layers[name] = layer;
-                    // Enable collision for buildings and trees (Trn_3)
-                    if (name.startsWith('Bldg') || name === 'Trn_3') {
+                    // Enable collision for buildings only (not Trn_3 which has stairs)
+                    if (name.startsWith('Bldg')) {
                         layer.setCollisionByExclusion([-1]);
                         console.log(`Game.create: Enabled collision for ${name}`);
                     }
@@ -116,15 +116,15 @@ export default class GameScene extends Phaser.Scene {
 
         this.player = this.physics.add.sprite(spawnX, spawnY, 'detective');
         this.player.setScale(1.0);  // Same scale as NPCs (both 64x64 frames now)
-        this.player.body.setSize(32, 24);
-        this.player.body.setOffset(16, 40);
+        this.player.body.setSize(32, 24);  // Original size
+        this.player.body.setOffset(16, 40);  // Original offset
         this.player.setCollideWorldBounds(true);
         this.player.setDepth(10);
         this.lastDirection = 'down'; // Track direction for idle
 
-        // Collide with all building layers AND terrain layer 3 (trees)
+        // Collide with all building layers only
         Object.keys(this.layers).forEach(key => {
-            if (key.startsWith('Bldg') || key === 'Trn_3') {
+            if (key.startsWith('Bldg')) {
                 this.physics.add.collider(this.player, this.layers[key]);
             }
         });
@@ -256,8 +256,11 @@ export default class GameScene extends Phaser.Scene {
     }
 
     spawnNPCs() {
-        // NPC types available (add more keys here when user adds more sprites)
-        const npcTypes = ['npc_1', 'npc_2', 'npc_3', 'npc_4', 'npc_5'];
+        // NPC types available (all 35 NPC sprites)
+        const npcTypes = [];
+        for (let i = 1; i <= 35; i++) {
+            npcTypes.push(`npc_${i}`);
+        }
 
         // Map is 4096x4096 - spread NPCs across the entire map
         const mapWidth = 4096;
@@ -272,10 +275,12 @@ export default class GameScene extends Phaser.Scene {
             { x: 1800, y: 1800, width: 500, height: 500 },   // Center
             { x: 1000, y: 2500, width: 500, height: 500 },   // West-South
             { x: 2500, y: 1000, width: 500, height: 500 },   // East-North
+            { x: 500, y: 2000, width: 400, height: 400 },    // West-Mid
+            { x: 3000, y: 2000, width: 400, height: 400 },   // East-Mid
         ];
 
-        // Sparse NPC count - only 5 across the whole map
-        const npcCount = 5;
+        // Spawn 15 NPCs spread across the map (using random types from 35)
+        const npcCount = 15;
 
         for (let i = 0; i < npcCount; i++) {
             // Each NPC spawns in a DIFFERENT zone (spread out)
@@ -315,7 +320,7 @@ export default class GameScene extends Phaser.Scene {
 
             // Collide with buildings and trees
             Object.keys(this.layers).forEach(key => {
-                if (key.startsWith('Bldg') || key === 'Trn_3') {
+                if (key.startsWith('Bldg')) {
                     this.physics.add.collider(npc, this.layers[key]);
                 }
             });
@@ -406,6 +411,29 @@ export default class GameScene extends Phaser.Scene {
         });
     }
 
+    createSprintTrail() {
+        // Create a fading dust particle behind the player
+        const trail = this.add.circle(
+            this.player.x,
+            this.player.y + 20,  // At feet level
+            4,
+            0x8b7355,  // Dust brown color
+            0.6
+        );
+        trail.setDepth(5);
+
+        // Fade out and destroy
+        this.tweens.add({
+            targets: trail,
+            alpha: 0,
+            scaleX: 0.2,
+            scaleY: 0.2,
+            duration: 200,
+            ease: 'Power2',
+            onComplete: () => trail.destroy()
+        });
+    }
+
     update(time, delta) {
         // Update NPCs (with guard)
         if (this.npcs && this.npcs.length > 0) {
@@ -446,7 +474,7 @@ export default class GameScene extends Phaser.Scene {
         // Movement
         this.player.setVelocity(0);
         const baseSpeed = 180;
-        const sprintMultiplier = 1.8;
+        const sprintMultiplier = 1.3;  // Minor speed boost
         const isSprinting = this.cursors.shift.isDown;
         const speed = isSprinting ? baseSpeed * sprintMultiplier : baseSpeed;
         let moving = false;
@@ -471,6 +499,11 @@ export default class GameScene extends Phaser.Scene {
             this.player.anims.play('walk-down', true);
             this.lastDirection = 'down';
             moving = true;
+        }
+
+        // Sprint trail effect
+        if (moving && isSprinting) {
+            this.createSprintTrail();
         }
 
         if (!moving) {
