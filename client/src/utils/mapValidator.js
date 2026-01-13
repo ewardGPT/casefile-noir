@@ -279,38 +279,7 @@ export async function validateTiledMap({
     // Wait, I need to keep the file structure intact. 
     // I will use replace logic carefully.
 
-    // ---------- BFS Connectivity ----------
-    const startIdx = spawn.idx;
-    const visited = new Uint8Array(total);
-    const queue = new Int32Array(total);
-    let head = 0;
-    let tail = 0;
 
-    // ... (rest of BFS) ...
-    // Since I cannot replace the entire file, I will just ensure the blocked logic is updated.
-
-    // ---------- NPC Spawn Validation ----------
-    // Pre-compute valid spawn positions for NPCs across the map
-    // Using a grid-based approach to cover the entire map
-    const npcSpawnZones = [];
-    const zoneW = 600;
-    const zoneH = 600;
-    const cols = Math.floor((mapW * tw) / zoneW);
-    const rows = Math.floor((mapH * th) / zoneH);
-
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            npcSpawnZones.push({
-                x: c * zoneW + 100,
-                y: r * zoneH + 100,
-                width: zoneW - 200,
-                height: zoneH - 200
-            });
-        }
-    }
-
-    const validatedNPCSpawns = [];
-    const npcCount = 35; // Target NPC count (User requested 35)
 
     onProgress?.({ phase: "spawn-ok", spawn });
 
@@ -472,20 +441,26 @@ export async function validateTiledMap({
 
     // ---------- NPC Spawn Validation ----------
     // Pre-compute valid spawn positions for NPCs across the map
-    const npcSpawnZones = [
-        { x: 100, y: 100, width: 600, height: 600 },     // NW corner
-        { x: 3400, y: 100, width: 600, height: 600 },    // NE corner
-        { x: 100, y: 3400, width: 600, height: 600 },    // SW corner
-        { x: 3400, y: 3400, width: 600, height: 600 },   // SE corner
-        { x: 1800, y: 1800, width: 500, height: 500 },   // Center
-        { x: 1000, y: 2500, width: 500, height: 500 },   // West-South
-        { x: 2500, y: 1000, width: 500, height: 500 },   // East-North
-        { x: 500, y: 2000, width: 400, height: 400 },    // West-Mid
-        { x: 3000, y: 2000, width: 400, height: 400 },   // East-Mid
-    ];
+    // Using a grid-based approach to cover the entire map
+    const npcSpawnZones = [];
+    const zoneW = 600;
+    const zoneH = 600;
+    const cols = Math.floor((mapW * tw) / zoneW);
+    const rows = Math.floor((mapH * th) / zoneH);
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            npcSpawnZones.push({
+                x: c * zoneW + 100,
+                y: r * zoneH + 100,
+                width: zoneW - 200,
+                height: zoneH - 200
+            });
+        }
+    }
 
     const validatedNPCSpawns = [];
-    const npcCount = 15; // Target NPC count
+    const npcCount = 35; // Target NPC count (User requested 35)
 
     for (let i = 0; i < npcCount; i++) {
         const zone = npcSpawnZones[i % npcSpawnZones.length];

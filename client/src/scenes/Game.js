@@ -73,23 +73,35 @@ export default class GameScene extends Phaser.Scene {
             console.log(`Game.create: ${tilesets.length} tilesets loaded.`);
 
             // Create Layers
-            const layerNames = ['Trn_1', 'Trn_2', 'Trn_3', 'Bldg_1', 'Bldg_2', 'Bldg_3', 'Bldg_4'];
+            // Create Layers
             console.log("Game.create: Creating layers...");
-
             this.layers = {};
-            layerNames.forEach(name => {
+
+            // Dynamically load all layers from the map
+            map.layers.forEach(layerData => {
+                const name = layerData.name;
+
+                // Skip if it is an object layer (Phaser map.layers usually only contains tile layers, but good to check)
+                // Actually map.layers might contain all.
+
                 console.log(`Game.create: Processing layer ${name}...`);
                 const layer = map.createLayer(name, tilesets, 0, 0);
                 if (layer) {
                     this.layers[name] = layer;
-                    // Enable collision for buildings only (not Trn_3 which has stairs)
-                    if (name.startsWith('Bldg')) {
+
+                    // Enable collision for Buildings, Walls, and Decorations
+                    // This fixes player clipping into trees/bushes (Deco/Plant/Prop layers)
+                    if (name.startsWith('Bldg') || name.startsWith('Wall') ||
+                        name.startsWith('Deco') || name.startsWith('Prop') ||
+                        name.startsWith('Plant') || name.startsWith('Tree')) {
+
+                        // NOT Trn_3 (stairs) which should remain walkable
                         layer.setCollisionByExclusion([-1]);
                         console.log(`Game.create: Enabled collision for ${name}`);
                     }
                     console.log(`Game.create: Layer ${name} created.`);
                 } else {
-                    console.warn(`Game.create: Layer ${name} not created (not found in map?).`);
+                    console.warn(`Game.create: Layer ${name} not created.`);
                 }
             });
             console.log("Game.create: Layers done.");
