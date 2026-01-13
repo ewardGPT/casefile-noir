@@ -114,9 +114,9 @@ export default class GameScene extends Phaser.Scene {
         const spawnY = 300; // Street level, top-left ish
 
         this.player = this.physics.add.sprite(spawnX, spawnY, 'detective');
-        this.player.setScale(1.0);
-        this.player.body.setSize(48, 36);
-        this.player.body.setOffset(24, 60);
+        this.player.setScale(0.7);  // Scaled down to match NPC size
+        this.player.body.setSize(40, 30);
+        this.player.body.setOffset(28, 45);
         this.player.setCollideWorldBounds(true);
         this.player.setDepth(10);
         this.lastDirection = 'down'; // Track direction for idle
@@ -248,9 +248,119 @@ export default class GameScene extends Phaser.Scene {
 
         // --- 10. Rain FX ---
         this.createRain();
+
+        // --- 11. NPCs ---
+        this.npcs = [];
+        this.spawnNPCs();
     }
 
-    update() {
+    spawnNPCs() {
+        // Define the walkable town square area (adjust as needed for map)
+        const walkArea = { x: 200, y: 200, width: 600, height: 500 };
+
+        // Create invisible boundary walls around the walk area
+        this.npcBoundary = this.physics.add.staticGroup();
+        const thickness = 20;
+
+        // Top wall
+        this.npcBoundary.add(this.add.rectangle(walkArea.x + walkArea.width / 2, walkArea.y - thickness / 2, walkArea.width + thickness * 2, thickness, 0x000000, 0));
+        // Bottom wall  
+        this.npcBoundary.add(this.add.rectangle(walkArea.x + walkArea.width / 2, walkArea.y + walkArea.height + thickness / 2, walkArea.width + thickness * 2, thickness, 0x000000, 0));
+        // Left wall
+        this.npcBoundary.add(this.add.rectangle(walkArea.x - thickness / 2, walkArea.y + walkArea.height / 2, thickness, walkArea.height, 0x000000, 0));
+        // Right wall
+        this.npcBoundary.add(this.add.rectangle(walkArea.x + walkArea.width + thickness / 2, walkArea.y + walkArea.height / 2, thickness, walkArea.height, 0x000000, 0));
+
+        // Spawn NPCs inside the walk area
+        const npcSpawns = [
+            { x: walkArea.x + 100, y: walkArea.y + 150, type: 1 },
+            { x: walkArea.x + 250, y: walkArea.y + 100, type: 2 },
+            { x: walkArea.x + 400, y: walkArea.y + 200, type: 3 },
+            { x: walkArea.x + 150, y: walkArea.y + 300, type: 4 },
+            { x: walkArea.x + 500, y: walkArea.y + 150, type: 5 },
+            { x: walkArea.x + 300, y: walkArea.y + 350, type: 1 },
+            { x: walkArea.x + 450, y: walkArea.y + 100, type: 2 },
+            { x: walkArea.x + 200, y: walkArea.y + 250, type: 3 },
+        ];
+
+        npcSpawns.forEach(spawn => {
+            const npcKey = `npc_${spawn.type}`;
+            const npc = this.physics.add.sprite(spawn.x, spawn.y, npcKey);
+            npc.setScale(1.0);  // Same visual size as player
+            npc.body.setSize(40, 30);
+            npc.body.setOffset(12, 34);
+            npc.setDepth(9);
+
+            // NPC data
+            npc.npcType = spawn.type;
+            npc.npcKey = npcKey;
+            npc.direction = 'down';
+            npc.isWalking = false;
+            npc.waitTime = Phaser.Math.Between(500, 2000);
+            npc.walkTime = 0;
+
+            // Collide with boundary walls
+            this.physics.add.collider(npc, this.npcBoundary);
+
+            // Collide with buildings
+            Object.keys(this.layers).forEach(key => {
+                if (key.startsWith('Bldg')) {
+                    this.physics.add.collider(npc, this.layers[key]);
+                }
+            });
+
+            // Collide with player
+            this.physics.add.collider(npc, this.player);
+
+            // Collide with other NPCs
+            this.npcs.forEach(otherNpc => {
+                this.physics.add.collider(npc, otherNpc);
+            });
+
+            this.npcs.push(npc);
+        });
+    }
+
+    updateNPCs(delta) {
+        const directions = ['down', 'left', 'right', 'up'];
+        const velocities = {
+            down: { x: 0, y: 40 },
+            up: { x: 0, y: -40 },
+            left: { x: -40, y: 0 },
+            right: { x: 40, y: 0 }
+        };
+
+        this.npcs.forEach(npc => {
+            if (npc.isWalking) {
+                npc.walkTime -= delta;
+                if (npc.walkTime <= 0) {
+                    // Stop walking
+                    npc.isWalking = false;
+                    npc.setVelocity(0);
+                    npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
+                    npc.waitTime = Phaser.Math.Between(1500, 4000);
+                }
+            } else {
+                npc.waitTime -= delta;
+                if (npc.waitTime <= 0) {
+                    // Start walking in random direction
+                    npc.direction = Phaser.Utils.Array.GetRandom(directions);
+                    npc.isWalking = true;
+                    npc.walkTime = Phaser.Math.Between(1000, 3000);
+                    const vel = velocities[npc.direction];
+                    npc.setVelocity(vel.x, vel.y);
+                    npc.anims.play(`${npc.npcKey}-walk-${npc.direction}`, true);
+                }
+            }
+        });
+    }
+
+    update(time, delta) {
+        // Update NPCs (with guard)
+        if (this.npcs && this.npcs.length > 0) {
+            this.updateNPCs(delta);
+        }
+
         if (this.endingVisible || this.evidenceModal.isOpen || this.interrogationUI.isOpen) {
             this.player.setVelocity(0);
             return;

@@ -8,40 +8,114 @@ export default class HowToPlay extends Phaser.Scene {
     create() {
         const { width, height } = this.scale;
 
-        this.add.rectangle(0, 0, width, height, 0x05070c, 1).setOrigin(0, 0);
+        // --- Dark Background ---
+        this.add.rectangle(0, 0, width, height, 0x0a0f18, 1).setOrigin(0, 0);
+
+        // --- Vignette Overlay ---
+        const vignette = this.add.graphics();
+        vignette.fillStyle(0x000000, 0.3);
+        vignette.fillRect(0, 0, width, height);
+
+        // --- Title ---
+        this.add.text(width / 2 + 3, 80 + 3, "HOW TO PLAY", {
+            fontFamily: "'Georgia', serif",
+            fontSize: "48px",
+            color: "#000000",
+        }).setOrigin(0.5).setAlpha(0.5);
 
         this.add.text(width / 2, 80, "HOW TO PLAY", {
-            fontFamily: "monospace",
-            fontSize: "44px",
-            color: "#ffffff",
+            fontFamily: "'Georgia', serif",
+            fontSize: "48px",
+            color: "#d4af37",
+            stroke: "#1a1a1a",
+            strokeThickness: 4,
         }).setOrigin(0.5);
 
-        this.add.text(width / 2, 200,
-            `WASD / Arrow Keys  - Move
-E                 - Interact
-TAB               - Notebook
-ESC               - Close menus
+        // --- Controls Section ---
+        const controlsY = 180;
+        const controls = [
+            ["WASD / Arrow Keys", "Move around"],
+            ["E", "Interact with objects"],
+            ["TAB", "Open notebook"],
+            ["ESC", "Close menus"],
+        ];
 
-Goal:
-Collect evidence, interrogate suspects,
-connect contradictions, and accuse the culprit.`,
-            {
+        controls.forEach((ctrl, i) => {
+            const y = controlsY + i * 45;
+
+            // Key
+            this.add.text(width / 2 - 120, y, ctrl[0], {
                 fontFamily: "monospace",
-                fontSize: "22px",
-                color: "#cbd5e1",
-                align: "center",
-                lineSpacing: 12,
-            }).setOrigin(0.5);
+                fontSize: "20px",
+                color: "#d4af37",
+                backgroundColor: "#1a2030",
+                padding: { left: 10, right: 10, top: 5, bottom: 5 },
+            }).setOrigin(1, 0.5);
 
-        const back = this.add.text(width / 2, height - 90, "← BACK", {
-            fontFamily: "monospace",
-            fontSize: "26px",
+            // Description
+            this.add.text(width / 2 - 100, y, ctrl[1], {
+                fontFamily: "'Georgia', serif",
+                fontSize: "20px",
+                color: "#c0c0c0",
+            }).setOrigin(0, 0.5);
+        });
+
+        // --- Goal Section ---
+        const goalY = controlsY + controls.length * 45 + 60;
+
+        this.add.text(width / 2, goalY, "— Your Mission —", {
+            fontFamily: "'Georgia', serif",
+            fontSize: "24px",
+            fontStyle: "italic",
+            color: "#d4af37",
+        }).setOrigin(0.5);
+
+        this.add.text(width / 2, goalY + 50,
+            `Collect evidence from crime scenes.
+Interrogate suspects and witnesses.
+Find contradictions in their stories.
+Identify and accuse the culprit.`,
+            {
+                fontFamily: "'Georgia', serif",
+                fontSize: "18px",
+                color: "#9aa4b2",
+                align: "center",
+                lineSpacing: 8,
+            }).setOrigin(0.5, 0);
+
+        // --- Back Button ---
+        const back = this.add.text(width / 2, height - 80, "←  BACK TO MENU", {
+            fontFamily: "'Georgia', serif",
+            fontSize: "24px",
             color: "#ffffff",
-            backgroundColor: "#0f1722",
-            padding: { left: 18, right: 18, top: 10, bottom: 10 },
+            backgroundColor: "#0a0f18",
+            padding: { left: 25, right: 25, top: 12, bottom: 12 },
+            stroke: "#3a4a5a",
+            strokeThickness: 1,
         }).setOrigin(0.5);
 
         back.setInteractive({ useHandCursor: true });
+
+        back.on("pointerover", () => {
+            this.tweens.add({
+                targets: back,
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 100,
+            });
+            back.setStyle({ backgroundColor: "#1a2a3a", stroke: "#5a7a9a" });
+        });
+
+        back.on("pointerout", () => {
+            this.tweens.add({
+                targets: back,
+                scaleX: 1.0,
+                scaleY: 1.0,
+                duration: 100,
+            });
+            back.setStyle({ backgroundColor: "#0a0f18", stroke: "#3a4a5a" });
+        });
+
         back.on("pointerdown", () => this.scene.start("StartMenu"));
 
         this.input.keyboard.once("keydown-ESC", () => this.scene.start("StartMenu"));

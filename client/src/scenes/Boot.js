@@ -38,6 +38,11 @@ export default class Boot extends Phaser.Scene {
 
         // Load the new detective spritesheet (32x32 frames, 5 rows)
         this.load.spritesheet('detective', 'assets/sprites/characters/detective.png', { frameWidth: 96, frameHeight: 96 });
+
+        // Load NPC spritesheets (4x4 grid, 64x64 frames based on 256x256 image)
+        for (let i = 1; i <= 5; i++) {
+            this.load.spritesheet(`npc_${i}`, `assets/sprites/characters/npc_${i}.png`, { frameWidth: 64, frameHeight: 64 });
+        }
     }
 
     create() {
@@ -65,6 +70,24 @@ export default class Boot extends Phaser.Scene {
         this.anims.create({ key: 'idle-left', frames: [{ key: 'detective', frame: 4 }], frameRate: 1 });
         this.anims.create({ key: 'idle-right', frames: [{ key: 'detective', frame: 8 }], frameRate: 1 });
         this.anims.create({ key: 'idle-up', frames: [{ key: 'detective', frame: 12 }], frameRate: 1 });
+
+        // NPC Animations (same pattern for all 5 NPCs)
+        for (let i = 1; i <= 5; i++) {
+            const npcKey = `npc_${i}`;
+            ['down', 'left', 'right', 'up'].forEach((dir, idx) => {
+                this.anims.create({
+                    key: `${npcKey}-walk-${dir}`,
+                    frames: this.anims.generateFrameNumbers(npcKey, { start: idx * 4, end: idx * 4 + 3 }),
+                    frameRate: 6,
+                    repeat: -1
+                });
+                this.anims.create({
+                    key: `${npcKey}-idle-${dir}`,
+                    frames: [{ key: npcKey, frame: idx * 4 }],
+                    frameRate: 1
+                });
+            });
+        }
 
         console.log("Boot scene complete. Starting Menu...");
         this.scene.start('StartMenu');
