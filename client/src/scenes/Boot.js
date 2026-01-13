@@ -60,11 +60,11 @@ export default class Boot extends Phaser.Scene {
             });
         });
 
-        // Idle Animations (Single frame from Row 5)
-        this.anims.create({ key: 'idle-down', frames: [{ key: 'detective', frame: 16 }], frameRate: 1 });
-        this.anims.create({ key: 'idle-left', frames: [{ key: 'detective', frame: 17 }], frameRate: 1 });
-        this.anims.create({ key: 'idle-right', frames: [{ key: 'detective', frame: 18 }], frameRate: 1 });
-        this.anims.create({ key: 'idle-up', frames: [{ key: 'detective', frame: 19 }], frameRate: 1 });
+        // Idle Animations (Use first frame of each walk direction since sprite only has 4 rows)
+        this.anims.create({ key: 'idle-down', frames: [{ key: 'detective', frame: 0 }], frameRate: 1 });
+        this.anims.create({ key: 'idle-left', frames: [{ key: 'detective', frame: 4 }], frameRate: 1 });
+        this.anims.create({ key: 'idle-right', frames: [{ key: 'detective', frame: 8 }], frameRate: 1 });
+        this.anims.create({ key: 'idle-up', frames: [{ key: 'detective', frame: 12 }], frameRate: 1 });
 
         console.log("Boot scene complete. Starting Menu...");
         this.scene.start('StartMenu');
