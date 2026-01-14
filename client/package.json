@@ -7,7 +7,13 @@
         "dev": "vite",
         "build": "vite build",
         "preview": "vite preview",
-        "predev": "node ../scripts/generate-manifest.js"
+        "predev": "node ../scripts/generate-manifest.js",
+        "qa": "npm run qa:health && npm run qa:assets && npm run qa:map && npm run qa:scenes",
+        "qa:health": "node qa/qa-health.js",
+        "qa:assets": "node qa/qa-assets.js",
+        "qa:map": "node qa/qa-map.js",
+        "qa:scenes": "node qa/qa-scenes.js",
+        "qa:build": "vite build"
     },
     "devDependencies": {
         "vite": "^5.0.0"

@@ -14,6 +14,7 @@ import {
 import { checkContradictions } from '../api.js';
 import { MapDebugOverlay } from '../utils/mapDebugOverlay.js';
 import { AStarPathfinder } from '../utils/astarPathfinding.js';
+import { NPCController } from '../utils/npcController.js';
 
 
 export default class GameScene extends Phaser.Scene {
@@ -248,6 +249,17 @@ export default class GameScene extends Phaser.Scene {
         this.wasd = this.input.keyboard.addKeys('W,A,S,D');
         this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
 
+        // Debug Physics Toggle
+        this.input.keyboard.on('keydown-F3', () => {
+            if (this.physics.world.drawDebug) {
+                this.physics.world.drawDebug = false;
+                this.physics.world.debugGraphic.clear();
+            } else {
+                this.physics.world.createDebugGraphic();
+                this.physics.world.drawDebug = true;
+            }
+        });
+
         // --- 9. UI ---
         this.notebookUI = new NotebookUI();
         this.notebookUI.setAccuseHandler((suspectId) => this.handleAccuse(suspectId));
@@ -365,33 +377,72 @@ export default class GameScene extends Phaser.Scene {
             const npc = this.physics.add.sprite(spawnX, spawnY, npcKey);
             npc.setScale(1.0);
             npc.body.setSize(32, 24);
-            npc.body.setOffset(16, 40);
-            npc.setDepth(9);
-            npc.setCollideWorldBounds(true);
-            npc.npcKey = npcKey;
-            npc.waypoints = [{ x: spawnX + 100, y: spawnY }, { x: spawnX, y: spawnY + 100 }];
-            npc.currentWaypoint = 0;
-            npc.direction = 'down';
-            npc.speed = 30;
-            npc.pauseTime = 1000;
-            npc.lastX = spawnX;
-            npc.lastY = spawnY;
-            npc.stuckFrames = 0;
+            // ... (legacy setup)
+            this.npcs.push(npc);
+        }
+    }
 
+    async spawnNPCs() {
+        if (!this.mapLoaded) return;
+
+        // Use map debug data if available
+        const debugData = (this.scene.get('StartMenu')).mapDebugData || {};
+        const validatedSpawns = debugData.validatedNPCSpawns || [];
+
+        if (validatedSpawns.length === 0) {
+            console.warn("Game.spawnNPCs: No validated spawns found! Using fallback.");
+            return this.spawnNPCsFallback();
+        }
+
+        // Initialize AStar if not already done
+        if (debugData.blocked && debugData.mapW && debugData.mapH) {
+            if (!this.astar) {
+                this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
+            }
+            // STORE FOR TILE GUARD
+            this.blockedTiles = debugData.blocked;
+            this.mapTileWidth = debugData.tw;
+            this.mapTileHeight = debugData.th;
+        }
+
+        console.log(`Game: Spawning ${validatedSpawns.length} validated NPCs.`);
+
+        validatedSpawns.forEach((spawn, i) => {
+            // Create Sprite
+            const npc = this.physics.add.sprite(spawn.x, spawn.y, spawn.npcType);
+
+            // Adjust body size for top-down perspective
+            npc.body.setSize(16, 16);
+            npc.body.setOffset(8, 16);
+            npc.setPushable(true);
+
+            // Create Controller
+            const controller = new NPCController(this, npc, this.astar, {
+                speed: 40,
+                wanderRadius: 150,
+                minPauseMs: 1000,
+                maxPauseMs: 3500
+            });
+            npc.controller = controller;
+
+            // Enable Collisions with map layers
             Object.keys(this.layers).forEach(key => {
-                if (key.startsWith('Bldg')) {
+                // Collide with buildings, walls, deco, trees
+                if (key.startsWith('Bldg') || key.startsWith('Wall') ||
+                    key.startsWith('Deco') || key.startsWith('Tree') ||
+                    key.startsWith('Structure') || key.startsWith('Plant')) {
                     this.physics.add.collider(npc, this.layers[key]);
                 }
             });
 
-            this.physics.add.overlap(npc, this.player, () => {
-                npc.pauseTime = 500;
-                npc.setVelocity(0);
-            });
+            // Collide with player
+            this.physics.add.collider(npc, this.player);
 
             this.npcs.push(npc);
-        }
-        console.log(`Spawned ${npcCount} NPCs (fallback mode)`);
+
+            // Play initial idle animation
+            controller.updateAnimation(0, 0);
+        });
     }
 
     updateNPCs(delta) {
@@ -513,15 +564,83 @@ export default class GameScene extends Phaser.Scene {
     }
 
     update(time, delta) {
+        // Cap physics delta to prevent tunneling
+        const dt = Math.min(delta, 50);
+
         // Update NPCs (with guard)
         if (this.npcs && this.npcs.length > 0) {
-            this.updateNPCs(delta);
+            this.updateNPCs(time, dt);
         }
 
         if (this.endingVisible || this.evidenceModal.isOpen || this.interrogationUI.isOpen) {
             this.player.setVelocity(0);
             return;
         }
+
+        // --- EXTREME BOUNDARY CONTROL (Sanity Check) ---
+        // Every 1 second, verify player is within map bounds
+        if (time > (this.nextSanityCheck || 0)) {
+            const px = this.player.x;
+            const py = this.player.y;
+            const mw = this.physics.world.bounds.width;
+            const mh = this.physics.world.bounds.height;
+
+            if (px < 0 || px > mw || py < 0 || py > mh) {
+                console.warn(`[BOUNDARY VIOLATION] Player at ${truncate(px)},${truncate(py)}. Clamping.`);
+                this.player.setPosition(
+                    Phaser.Math.Clamp(px, 16, mw - 16),
+                    Phaser.Math.Clamp(py, 16, mh - 16)
+                );
+            }
+            this.nextSanityCheck = time + 1000;
+        }
+
+        // --- TILE GUARD: Failsafe blocked tile check ---
+        if (this.blockedTiles && this.mapTileWidth) {
+            const tw = this.mapTileWidth;
+            const th = this.mapTileHeight;
+            const mw = this.physics.world.bounds.width / tw;
+
+            // Check feet position (bottom center of bounding box)
+            const feetX = this.player.body.x + this.player.body.width / 2;
+            const feetY = this.player.body.y + this.player.body.height - 2;
+
+            const tx = Math.floor(feetX / tw);
+            const ty = Math.floor(feetY / th);
+            const idx = ty * mw + tx;
+
+            if (this.blockedTiles[idx]) {
+                // We are ON a blocked tile! Rollback immediate.
+                // console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty}. Rolling back.`);
+                if (this.lastSafePos) {
+                    this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
+                    this.player.setVelocity(0);
+                }
+            } else {
+                // Safe tile, update last safe pos
+                if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
+                this.lastSafePos.set(this.player.x, this.player.y);
+            }
+
+            // Anti-Clip Failsafe: If moving but position unchanged
+            const speed = this.player.body.speed;
+            if (speed > 10) {
+                const moved = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.lastSafePos.x, this.lastSafePos.y);
+                if (moved < 1) { // Not moving despite velocity
+                    if (!this.stuckTimer) this.stuckTimer = 0;
+                    this.stuckTimer += dt;
+                    if (this.stuckTimer > 400) {
+                        // Nudge slightly
+                        this.player.body.x += (Math.random() - 0.5) * 4;
+                        this.player.body.y += (Math.random() - 0.5) * 4;
+                        this.stuckTimer = 0;
+                    }
+                } else {
+                    this.stuckTimer = 0;
+                }
+            }
+        }
+
 
         this.interactionTarget = null;
         this.interactionType = null;
@@ -549,33 +668,30 @@ export default class GameScene extends Phaser.Scene {
             this.promptText.setVisible(false);
         }
 
-        // Movement
+        // Movement Normalization
         this.player.setVelocity(0);
-        const baseSpeed = 180;
-        const sprintMultiplier = 1.3;  // Minor speed boost
+        const baseSpeed = 160; // Slightly reduced for precision
+        const sprintMultiplier = 1.3;
         const isSprinting = this.cursors.shift.isDown;
         const speed = isSprinting ? baseSpeed * sprintMultiplier : baseSpeed;
         let moving = false;
 
+        let velocityX = 0;
+        let velocityY = 0;
+
         if (this.cursors.left.isDown || this.wasd.A.isDown) {
-            this.player.setVelocityX(-speed);
-            this.player.anims.play('walk-left', true);
-            this.lastDirection = 'left';
+            velocityX = -speed;
             moving = true;
         } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
-            this.player.setVelocityX(speed);
-            this.player.anims.play('walk-right', true);
-            this.lastDirection = 'right';
+            velocityX = speed;
             moving = true;
-        } else if (this.cursors.up.isDown || this.wasd.W.isDown) {
-            this.player.setVelocityY(-speed);
-            this.player.anims.play('walk-up', true);
-            this.lastDirection = 'up';
+        }
+
+        if (this.cursors.up.isDown || this.wasd.W.isDown) {
+            velocityY = -speed;
             moving = true;
         } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
-            this.player.setVelocityY(speed);
-            this.player.anims.play('walk-down', true);
-            this.lastDirection = 'down';
+            velocityY = speed;
             moving = true;
         }
 
@@ -584,10 +700,35 @@ export default class GameScene extends Phaser.Scene {
             this.createSprintTrail();
         }
 
-        if (!moving) {
-            // Play idle animation matching last direction
+        // Normalize diagonal speed
+        if (velocityX !== 0 && velocityY !== 0) {
+            velocityX *= 0.7071; // 1 / sqrt(2)
+            velocityY *= 0.7071;
+        }
+
+        this.player.setVelocity(velocityX, velocityY);
+
+        if (moving) {
+            // Update animation
+            let anim = 'walk-down';
+            if (velocityX > 0) anim = 'walk-right';
+            else if (velocityX < 0) anim = 'walk-left';
+            else if (velocityY > 0) anim = 'walk-down';
+            else if (velocityY < 0) anim = 'walk-up';
+
+            // Store last direction for idle
+            if (Math.abs(velocityX) > 0.1) this.lastDirection = velocityX > 0 ? 'right' : 'left';
+            else if (Math.abs(velocityY) > 0.1) this.lastDirection = velocityY > 0 ? 'down' : 'up';
+
+            this.player.anims.play(anim, true);
+
+            // Sprint Trail
+            if (isSprinting && (this.time.now - this.lastTrailTime > 100)) {
+                this.createSprintTrail();
+                this.lastTrailTime = this.time.now;
+            }
+        } else {
             this.player.anims.play(`idle-${this.lastDirection}`, true);
-            this.player.setVelocity(0);
         }
 
         // Interaction

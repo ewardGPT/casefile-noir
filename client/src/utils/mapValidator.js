@@ -480,6 +480,32 @@ export async function validateTiledMap({
             if (tileX >= 0 && tileY >= 0 && tileX < mapW && tileY < mapH) {
                 const idx = tileY * mapW + tileX;
                 if (!blocked[idx] && visited[idx]) {
+                    // Check spacing (at least 3 tiles manhattan distance from others)
+                    let tooClose = false;
+                    for (const existing of validatedNPCSpawns) {
+                        const dist = Math.abs(existing.tileX - tileX) + Math.abs(existing.tileY - tileY);
+                        if (dist < 3) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    if (tooClose) continue;
+
+                    // Check wander density (ensure not trapped in tiny hole)
+                    let openTiles = 0;
+                    let totalTiles = 0;
+                    for (let dy = -2; dy <= 2; dy++) {
+                        for (let dx = -2; dx <= 2; dx++) {
+                            const nx = tileX + dx;
+                            const ny = tileY + dy;
+                            if (nx >= 0 && ny >= 0 && nx < mapW && ny < mapH) {
+                                totalTiles++;
+                                if (!blocked[ny * mapW + nx]) openTiles++;
+                            }
+                        }
+                    }
+                    if (openTiles / totalTiles < 0.4) continue; // Too cramped
+
                     // Generate random waypoints that are also reachable
                     const waypoints = [];
                     for (let w = 0; w < 4; w++) {

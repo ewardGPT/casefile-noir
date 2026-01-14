@@ -1,0 +1,10 @@
+≡ƒÅÑ Starting Project Health Check...
+
+--- REPORT ---
+Γ¥î ERRORS:
+  - Missing file: client/main.js
+Γä╣∩╕Å INFO:
+  - Found 5 scenes: Boot.js, Credits.js, Game.js, HowToPlay.js, StartMenu.js
+  - Registered Scene Keys: 
+  - Map loaded: 105x60 tiles
+----------------

@@ -1,0 +1,8 @@
+≡ƒÅÑ Running QA: Health Check...
+Γ¥î Dir exists: src
+Γ¥î Dir exists: public/assets
+Γ¥î File exists: public/assets/maps/world.json
+Γ¥î File exists: src/scenes/Boot.js
+Γ¥î File exists: src/scenes/StartMenu.js
+Γ¥î File exists: src/scenes/Game.js
+FAILED: 6 health checks failed.
