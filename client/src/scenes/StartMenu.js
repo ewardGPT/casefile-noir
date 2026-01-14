@@ -267,7 +267,9 @@ export default class StartMenu extends Phaser.Scene {
             console.warn("Cannot start: validation not passed yet");
             return;
         }
-        this.scene.start("Game");
+        this.scene.start("Game", {
+            mapDebugData: this.mapDebugData
+        });
     }
 
     async runMapValidation() {

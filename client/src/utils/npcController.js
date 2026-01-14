@@ -87,7 +87,26 @@ export class NPCController {
 
             case NPCState.MOVING:
                 this.followPath();
+                if (this.scene.physics.world.drawDebug) {
+                    this.drawDebugPath();
+                }
                 break;
+        }
+    }
+
+    drawDebugPath() {
+        if (!this.activePath || this.activePath.length === 0) return;
+
+        const graphics = this.scene.physics.world.debugGraphic;
+        graphics.lineStyle(1, 0x00ff00, 0.5);
+
+        for (let i = this.currentPathIndex; i < this.activePath.length - 1; i++) {
+            const nodeA = this.activePath[i];
+            const nodeB = this.activePath[i + 1];
+            graphics.lineBetween(
+                (nodeA.x + 0.5) * 32, (nodeA.y + 0.5) * 32,
+                (nodeB.x + 0.5) * 32, (nodeB.y + 0.5) * 32
+            );
         }
     }
 

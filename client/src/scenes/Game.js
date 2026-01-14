@@ -22,6 +22,21 @@ export default class GameScene extends Phaser.Scene {
         super('Game');
     }
 
+    init(data) {
+        console.log("Game.init started with data:", data);
+        this.mapDebugData = data.mapDebugData || {};
+
+        // --- NPC DIAGNOSTICS (User Step 1-8) ---
+        // Step 1: will happen in create (layer logging)
+        // Step 4: Texture check
+        console.log("---- DIAGNOSTIC STEP 4: TEXTURES ----");
+        this.textures.each((t) => {
+            if (t.key.startsWith('npc_') || t.key === 'detective') {
+                console.log(`Texture found: ${t.key}`);
+            }
+        });
+    }
+
     create() {
         loadGameState();
         this.caseSolution = {
@@ -266,6 +281,17 @@ export default class GameScene extends Phaser.Scene {
             }
         });
 
+        // NPC Debug Toggle (F4)
+        this.input.keyboard.on('keydown-F4', () => {
+            if (this.npcDebugActive) {
+                this.npcDebugActive = false;
+                this.hideNPCDebug();
+            } else {
+                this.npcDebugActive = true;
+                this.showNPCDebug();
+            }
+        });
+
         // --- 9. UI ---
         this.notebookUI = new NotebookUI();
         this.notebookUI.setAccuseHandler((suspectId) => this.handleAccuse(suspectId));
@@ -391,9 +417,12 @@ export default class GameScene extends Phaser.Scene {
     async spawnNPCs() {
         if (!this.mapLoaded) return;
 
-        // Use map debug data if available
-        const debugData = (this.scene.get('StartMenu')).mapDebugData || {};
+        // Use passed data from init()
+        const debugData = this.mapDebugData || {};
         const validatedSpawns = debugData.validatedNPCSpawns || [];
+
+        console.log("---- DIAGNOSTIC STEP 2 & 3: SPANWS ----");
+        console.log(`Validated Spawns Count: ${validatedSpawns.length}`);
 
         if (validatedSpawns.length === 0) {
             console.warn("Game.spawnNPCs: No validated spawns found! Using fallback.");
@@ -414,6 +443,8 @@ export default class GameScene extends Phaser.Scene {
         console.log(`Game: Spawning ${validatedSpawns.length} validated NPCs.`);
 
         validatedSpawns.forEach((spawn, i) => {
+            if (i < 10) console.log(`Spawn ${i}: ${spawn.npcType} at ${spawn.x},${spawn.y}`); // Log first 10
+            // ...
             // Create Sprite
             const npc = this.physics.add.sprite(spawn.x, spawn.y, spawn.npcType);
 
@@ -469,8 +500,12 @@ export default class GameScene extends Phaser.Scene {
                 npc.pauseTime -= delta;
                 npc.setVelocity(0);
                 npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
+                if (npc.debugText) npc.debugText.setPosition(npc.x, npc.y - 20);
                 return;
             }
+
+            npc.controller.update(0, delta);
+            if (npc.debugText) npc.debugText.setPosition(npc.x, npc.y - 20);
 
             // If no active path, calculate one to current waypoint
             if (!npc.activePath || npc.activePath.length === 0) {
