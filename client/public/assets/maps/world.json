@@ -19,15 +19,15 @@
             "name": "Collisions",
             "objects": [
                 {
-                    "height": 200,
+                    "height": 192,
                     "id": 1,
                     "name": "",
                     "rotation": 0,
                     "type": "",
                     "visible": true,
-                    "width": 400,
-                    "x": 1100,
-                    "y": 850
+                    "width": 384,
+                    "x": 1088,
+                    "y": 864
                 }
             ],
             "opacity": 1,
@@ -51,7 +51,7 @@
                     "visible": true,
                     "width": 0,
                     "x": 1100,
-                    "y": 1050
+                    "y": 1100
                 }
             ],
             "opacity": 1,
@@ -73,8 +73,8 @@
                     "type": "",
                     "visible": true,
                     "width": 96,
-                    "x": 1150,
-                    "y": 920,
+                    "x": 1152,
+                    "y": 1120,
                     "properties": [
                         {
                             "name": "kind",

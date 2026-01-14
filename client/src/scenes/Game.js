@@ -90,17 +90,23 @@ export default class GameScene extends Phaser.Scene {
                 if (layer) {
                     this.layers[name] = layer;
 
-                    // Enable collision for Buildings, Walls, and Decorations
-                    // This fixes player clipping into trees/bushes (Deco/Plant/Prop layers)
-                    if (name.startsWith('Bldg') || name.startsWith('Wall') ||
-                        name.startsWith('Deco') || name.startsWith('Prop') ||
-                        name.startsWith('Plant') || name.startsWith('Tree')) {
+                    // STRICT BOUNDARY CONTROL: "Get every block and every layer"
+                    // Strategy: Collide with EVERYTHING unless it's explicitly a "Ground" or "Floor" layer.
+                    // This is safer than a whitelist.
+                    const isSafe = name.includes('Ground') || name.includes('Floor') || name.includes('Street') || name.includes('Path') || name.includes('Grass') || name.includes('Sand') || name.includes('Water') || name.includes('Dirt') || name.startsWith('Terrain');
 
-                        // NOT Trn_3 (stairs) which should remain walkable
+                    if (!isSafe) {
+                        // It's a wall, building, roof, prop, deco, etc.
                         layer.setCollisionByExclusion([-1]);
-                        console.log(`Game.create: Enabled collision for ${name}`);
+                        console.log(`Game.create: BLOCKED layer ${name}`);
+
+                        // Set depth high for "overhead" layers like Roofs, but watch out for Trees hiding player.
+                        if (name.includes('Roof') || name.includes('Top')) {
+                            layer.setDepth(15);
+                        }
+                    } else {
+                        console.log(`Game.create: SAFE layer ${name}`);
                     }
-                    console.log(`Game.create: Layer ${name} created.`);
                 } else {
                     console.warn(`Game.create: Layer ${name} not created.`);
                 }
@@ -426,13 +432,15 @@ export default class GameScene extends Phaser.Scene {
             npc.controller = controller;
 
             // Enable Collisions with map layers
+            // We already set collisions on the layers themselves, but we need to ensure the sprite collides
             Object.keys(this.layers).forEach(key => {
-                // Collide with buildings, walls, deco, trees
-                if (key.startsWith('Bldg') || key.startsWith('Wall') ||
-                    key.startsWith('Deco') || key.startsWith('Tree') ||
-                    key.startsWith('Structure') || key.startsWith('Plant')) {
-                    this.physics.add.collider(npc, this.layers[key]);
+                // Only collide with layers we marked as blocked
+                const layer = this.layers[key];
+                if (layer.collisionMask && layer.collisionMask.size > 0) {
+                    this.physics.add.collider(npc, layer);
                 }
+                // Or just brute force it as per "every block"
+                this.physics.add.collider(npc, layer);
             });
 
             // Collide with player
@@ -440,9 +448,16 @@ export default class GameScene extends Phaser.Scene {
 
             this.npcs.push(npc);
 
+            // VERIFICATION: Ensure visibility
+            npc.setDepth(999); // Force on top
+            npc.setVisible(true);
+            npc.setAlpha(1);
+
             // Play initial idle animation
             controller.updateAnimation(0, 0);
         });
+
+        console.log(`Game: Successfully spawned ${this.npcs.length} NPCs with depth 999.`);
     }
 
     updateNPCs(delta) {

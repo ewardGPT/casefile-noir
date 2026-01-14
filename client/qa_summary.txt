@@ -1,0 +1,28 @@
+
+> detective-client@0.0.0 qa
+> npm run qa:health && npm run qa:assets && npm run qa:map && npm run qa:scenes
+
+
+> detective-client@0.0.0 qa:health
+> node qa/qa-health.js
+
+≡ƒÅÑ Running QA: Health Check...
+Γ£à Health Check PASS
+
+> detective-client@0.0.0 qa:assets
+> node qa/qa-assets.js
+
+≡ƒôª Running QA: Assets Check...
+Γ£à Assets Check PASS (2 assets verified)
+
+> detective-client@0.0.0 qa:map
+> node qa/qa-map.js
+
+≡ƒù║∩╕Å  Running QA: Map Check...
+Γ£à Map Check PASS
+
+> detective-client@0.0.0 qa:scenes
+> node qa/qa-scenes.js
+
+≡ƒÄ¼ Running QA: Scenes Check...
+Γ£à Scenes Check PASS (5 scenes)

@@ -273,6 +273,9 @@ export async function validateTiledMap({
 
     if (blocked[spawn.idx]) {
         report.warnings.push(`Player spawn at (${spawn.tx},${spawn.ty}) may be blocked. Check map.`);
+        report.stats.validPlayerSpawn = false;
+    } else {
+        report.stats.validPlayerSpawn = true;
     }
 
     // ---------- Objects ----------

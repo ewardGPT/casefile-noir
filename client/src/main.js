@@ -1,5 +1,33 @@
 import Boot from './scenes/Boot.js';
 import StartMenu from './scenes/StartMenu.js';
+
+// --- RUNTIME QA ERROR TRAP ---
+function showQAError(msg, source) {
+    const div = document.createElement('div');
+    div.style.position = 'fixed';
+    div.style.top = '0';
+    div.style.left = '0';
+    div.style.width = '100%';
+    div.style.height = '100%';
+    div.style.backgroundColor = 'rgba(50, 0, 0, 0.9)';
+    div.style.color = '#ffcccc';
+    div.style.zIndex = '999999';
+    div.style.padding = '20px';
+    div.style.fontFamily = 'monospace';
+    div.style.whiteSpace = 'pre-wrap';
+    div.innerHTML = `<h1>🛑 QA RUNTIME ERROR</h1><h2>${source || 'Unknown Source'}</h2><p>${msg}</p><button onclick="window.location.reload()">RELOAD</button>`;
+    document.body.appendChild(div);
+    console.error(`[QA TRAP] ${msg}`);
+}
+
+window.onerror = function (message, source, lineno, colno, error) {
+    showQAError(`${message}\nAt: ${source}:${lineno}:${colno}\nStack: ${error?.stack}`, 'window.onerror');
+    return false;
+};
+
+window.onunhandledrejection = function (event) {
+    showQAError(`${event.reason}`, 'Unhandled Promise Rejection');
+};
 import HowToPlay from './scenes/HowToPlay.js';
 import Credits from './scenes/Credits.js';
 import GameScene from './scenes/Game.js';

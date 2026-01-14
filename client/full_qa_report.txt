@@ -1,0 +1,39 @@
+
+> detective-client@0.0.0 qa
+> npm run qa:health && npm run qa:assets && npm run qa:map && npm run qa:scenes && npm run qa:npcs
+
+
+> detective-client@0.0.0 qa:health
+> node qa/qa-health.js
+
+≡ƒÅÑ Running QA: Health Check...
+Γ£à Health Check PASS
+
+> detective-client@0.0.0 qa:assets
+> node qa/qa-assets.js
+
+≡ƒôª Running QA: Assets Check...
+Γ£à Assets Check PASS (2 assets verified)
+
+> detective-client@0.0.0 qa:map
+> node qa/qa-map.js
+
+≡ƒù║∩╕Å  Running QA: Map Check...
+Γ£à Map Check PASS
+
+> detective-client@0.0.0 qa:scenes
+> node qa/qa-scenes.js
+
+≡ƒÄ¼ Running QA: Scenes Check...
+Γ£à Scenes Check PASS (5 scenes)
+
+> detective-client@0.0.0 qa:npcs
+> node qa/qa-npcs.js
+
+≡ƒñû Running QA: NPC Spawning Logic...
+
+--- NPC Analysis ---
+Validated Spawns: 35
+Failed Spawns:    0
+Γ£à Success: All 35 NPCs have valid spawn points.
+Γ£à Success: Player spawn is valid.

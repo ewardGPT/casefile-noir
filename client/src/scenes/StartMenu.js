@@ -351,9 +351,11 @@ export default class StartMenu extends Phaser.Scene {
 
         } catch (e) {
             console.error("Map validation error:", e);
-            this.validationText?.setText("⚠️ Validation error - Press START to continue");
-            this.validationText?.setStyle({ color: "#fbbf24" });
-            this.validationPassed = true; // Allow start even on error
+            this.validationText?.setText("🛑 Validation FAILED. Game blocked.");
+            this.validationText?.setStyle({ color: "#ef4444" });
+            this.validationPassed = false; // BLOCK START
+            // Show error details on screen if possible, or trigger QA trap
+            throw e; // Will trigger window.onunhandledrejection in main.js
         }
     }
 
