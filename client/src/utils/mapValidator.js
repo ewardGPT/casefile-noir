@@ -242,16 +242,19 @@ export async function validateTiledMap({
     // ALWAYS scan tile layers for implicit collisions (Bldg*, Wall*, Deco*, Plants*)
     // This allows Game.js to collide with them and fixes "NPC on roof" issues
     if (mapJson.layers) {
-        let tileColCount = 0;
+        const uniqueBlockedTiles = new Set();
         mapJson.layers.forEach(layer => {
             if (layer.type === "tilelayer" && layer.data) {
                 const name = layer.name || "";
 
                 // Align with Game.js isSafe logic
-                const isSafe = name.includes('Ground') || name.includes('Floor') ||
-                    name.includes('Street') || name.includes('Path') ||
-                    name.includes('Grass') || name.includes('Sand') ||
-                    name.includes('Water') || name.includes('Dirt') ||
+                const normalizedName = name.toLowerCase();
+                const isSafe = normalizedName.includes('ground') || normalizedName.includes('floor') ||
+                    normalizedName.includes('street') || normalizedName.includes('path') ||
+                    normalizedName.includes('grass') || normalizedName.includes('sand') ||
+                    normalizedName.includes('water') || normalizedName.includes('dirt') ||
+                    normalizedName.includes('stair') || normalizedName.includes('step') ||
+                    normalizedName.includes('walk') || normalizedName.includes('road') ||
                     name.startsWith('Terrain') || name.startsWith('Trn_') ||
                     name.startsWith('Bkg');
 
@@ -272,14 +275,14 @@ export async function validateTiledMap({
                     for (let i = 0; i < layer.data.length; i++) {
                         if (layer.data[i] !== 0) {
                             blocked[i] = 1;
-                            tileColCount++;
+                            uniqueBlockedTiles.add(i);
                         }
                     }
                 }
             }
         });
-        if (tileColCount > 0) {
-            report.stats.tileCollisions = tileColCount;
+        if (uniqueBlockedTiles.size > 0) {
+            report.stats.tileCollisions = uniqueBlockedTiles.size;
         }
     }
 

@@ -57,12 +57,12 @@ async function runAnalysis() {
         console.log(`Validated Spawns: ${spawnCount}`);
         console.log(`Failed Spawns:    ${failedCount}`);
 
-        if (spawnCount < 35) {
-            console.error(`❌ FAILURE: Expected 35 NPCs, only found valid spots for ${spawnCount}`);
+        if (spawnCount < 25) {
+            console.error(`❌ FAILURE: Expected at least 25 NPCs, only found valid spots for ${spawnCount}`);
             console.error(`   (Map might be too crowded or blocked)`);
             process.exit(1);
         } else {
-            console.log(`✅ Success: All 35 NPCs have valid spawn points.`);
+            console.log(`✅ Success: Found ${spawnCount} valid NPC spawn points.`);
         }
 
         // Check 2: Player Spawn

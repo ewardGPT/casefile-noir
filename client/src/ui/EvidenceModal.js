@@ -186,14 +186,14 @@ export default class EvidenceModal {
                 image: this.currentEvidence.image || null
             });
             const analysis = {
-                observations: response.observations || [],
-                leads: response.leads || [],
-                questionsToAsk: response.questionsToAsk || []
+                observations: (response && response.observations) || [],
+                leads: (response && response.leads) || [],
+                questionsToAsk: (response && response.questionsToAsk) || []
             };
             const entry = {
                 ...this.currentEvidence,
                 analysis,
-                summary: response.summary || 'Analysis complete.'
+                summary: (response && response.summary) || 'Analysis complete.'
             };
             upsertEvidence(entry);
             addTimelineEvent({ text: `Evidence analyzed: ${entry.title || entry.id}` });

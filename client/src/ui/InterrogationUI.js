@@ -242,7 +242,7 @@ export default class InterrogationUI {
                 suspectId: this.currentSuspect.id,
                 question
             });
-            const reply = response.reply || response.answer || '...';
+            const reply = (response && (response.reply || response.answer)) || '...';
             addSuspectStatement(this.currentSuspect.id, this.currentSuspect.name, reply, 'Suspect');
             this.appendLog(`${this.currentSuspect.name}: ${reply}`, 'ai');
             await this.refreshContradictions();
@@ -263,7 +263,7 @@ export default class InterrogationUI {
                 suspectId: this.currentSuspect.id,
                 statements
             });
-            const contradictions = response.contradictions || [];
+            const contradictions = (response && response.contradictions) || [];
             setContradictions(contradictions);
             if (!contradictions.length) {
                 this.contradictionsEl.textContent = 'No contradictions detected.';
