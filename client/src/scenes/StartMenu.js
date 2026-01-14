@@ -287,7 +287,7 @@ export default class StartMenu extends Phaser.Scene {
             await this.delay(600);
 
             const report = await validateTiledMap({
-                mapUrl: "/assets/maps/world.json",
+                mapUrl: "/assets/maps/victorian/city_map_split.json",
                 onProgress: (p) => {
                     if (p.phase === "loaded") {
                         this.validationText?.setText(`📐 Map: ${p.mapW}x${p.mapH} tiles`);
@@ -345,6 +345,39 @@ export default class StartMenu extends Phaser.Scene {
 
             // Store debug data for Game scene overlay
             this.registry.set("mapDebugData", report.debug);
+
+            // Pre-start NPC texture checks
+            const missingNpcTextures = [];
+            for (let i = 1; i <= 35; i++) {
+                const key = `npc_${i}`;
+                if (!this.textures.exists(key)) {
+                    missingNpcTextures.push(key);
+                }
+            }
+
+            const hasCollisionData = (report.stats.collisionObjects || 0) > 0 || (report.stats.tileCollisions || 0) > 0;
+            const hasNpcSpawns = (report.stats.npcSpawnsValidated || 0) > 0;
+
+            if (!hasCollisionData) {
+                console.warn("Validation WARNING: no collision data found.");
+                // We still allow starting as Game.js has ground-truth collision logic
+            }
+
+            if (!hasNpcSpawns) {
+                console.warn("Validation WARNING: no NPC spawns found in reachable areas.");
+                this.validationText?.setText(`⚠️ WARNING: No NPC spawns (${report.stats.reachablePercent} reachable) - Press START`);
+                this.validationText?.setStyle({ color: "#fbbf24", fontSize: "16px" });
+                this.validationPassed = true; // Allow proceed with fallback NPCs
+                return;
+            }
+
+            if (missingNpcTextures.length) {
+                console.warn("Validation WARNING: missing NPC textures:", missingNpcTextures);
+                this.validationText?.setText(`⚠️ WARNING: Missing textures - Press START`);
+                this.validationText?.setStyle({ color: "#fbbf24", fontSize: "16px" });
+                this.validationPassed = true;
+                return;
+            }
 
             // Mark as passed - user must press START
             this.validationPassed = true;

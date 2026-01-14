@@ -46,6 +46,25 @@ function boundsCenterTile(o, tw, th, mapW, mapH) {
     return { tx, ty, idx: tileIndex(tx, ty, mapW) };
 }
 
+function findNearestWalkable(tx, ty, blocked, mapW, mapH) {
+    const maxRadius = Math.max(mapW, mapH);
+    for (let r = 0; r <= maxRadius; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+                if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                const nx = tx + dx;
+                const ny = ty + dy;
+                if (nx < 0 || ny < 0 || nx >= mapW || ny >= mapH) continue;
+                const idx = tileIndex(nx, ny, mapW);
+                if (!blocked[idx]) {
+                    return { tx: nx, ty: ny, idx };
+                }
+            }
+        }
+    }
+    return null;
+}
+
 function objectName(o) {
     return o.name || getProp(o, "id") || o.type || "(unnamed)";
 }
@@ -173,6 +192,7 @@ export async function validateTiledMap({
     const total = mapW * mapH;
     const blocked = new Uint8Array(total);
     const microGapTiles = new Uint8Array(total);
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
     // If we have explicit collision objects, use them
     if (hasCollisions) {
@@ -226,16 +246,30 @@ export async function validateTiledMap({
         mapJson.layers.forEach(layer => {
             if (layer.type === "tilelayer" && layer.data) {
                 const name = layer.name || "";
-                // Block anything that sounds like a distinct obstacle layer
-                // "Bldg" = Buildings, "Wall" = Walls, "Deco"/"Prop"/"Plant" = Obstacles
-                if (name.startsWith("Bldg") || name.startsWith("Wall") ||
-                    name.startsWith("Deco") || name.startsWith("Prop") ||
-                    name.startsWith("Plant") || name.startsWith("Tree") ||
-                    name.startsWith("Roof") || name.startsWith("Structure") ||
-                    name.startsWith("Object") || name.startsWith("Detail")) {
+
+                // Align with Game.js isSafe logic
+                const isSafe = name.includes('Ground') || name.includes('Floor') ||
+                    name.includes('Street') || name.includes('Path') ||
+                    name.includes('Grass') || name.includes('Sand') ||
+                    name.includes('Water') || name.includes('Dirt') ||
+                    name.startsWith('Terrain') || name.startsWith('Trn_') ||
+                    name.startsWith('Bkg');
+
+                const forceBlocked = name === 'Trn_3';
+
+                // Block if NOT safe OR explicitly forced, but respect Trn_1/2
+                if ((!isSafe || forceBlocked) && name !== 'Trn_1' && name !== 'Trn_2') {
+                    // DENSITY CHECK: If layer is > 50% full, it's likely an overlay/shadow, not a wall
+                    const filledCount = layer.data.filter(t => t !== 0).length;
+                    const mapSize = mapW * mapH;
+                    if (filledCount / mapSize > 0.5) {
+                        console.warn(`[Validator] Layer ${name} is too dense (${(filledCount / mapSize * 100).toFixed(1)}%), treating as decorative overlay.`);
+                        return;
+                    }
+
+                    console.log(`[Validator] Blocking layer found: ${name} (${(filledCount / mapSize * 100).toFixed(1)}% density)`);
 
                     for (let i = 0; i < layer.data.length; i++) {
-                        // If tile ID is non-zero, it exists
                         if (layer.data[i] !== 0) {
                             blocked[i] = 1;
                             tileColCount++;
@@ -267,6 +301,14 @@ export async function validateTiledMap({
         spawn = { tx: Math.floor(mapW / 4), ty: Math.floor(mapH / 4), idx: 0 };
         spawn.idx = tileIndex(spawn.tx, spawn.ty, mapW);
         report.warnings.push(`Using default spawn at (${spawn.tx},${spawn.ty}).`);
+    }
+
+    if (blocked[spawn.idx]) {
+        const adjusted = findNearestWalkable(spawn.tx, spawn.ty, blocked, mapW, mapH);
+        if (adjusted) {
+            report.warnings.push(`Player spawn at (${spawn.tx},${spawn.ty}) blocked; moved to (${adjusted.tx},${adjusted.ty}).`);
+            spawn = adjusted;
+        }
     }
 
     report.stats.playerTile = `${spawn.tx},${spawn.ty}`;
@@ -316,42 +358,76 @@ export async function validateTiledMap({
     onProgress?.({ phase: "objects-ok" });
 
     // ---------- Connectivity BFS ----------
-    const visited = new Uint8Array(total);
-    const q = new Int32Array(total);
-    let qh = 0;
-    let qt = 0;
+    // If no reachable tiles, we'll try to find any walkable tile
+    let visited = new Uint8Array(mapW * mapH);
+    let reachableCount = 0;
 
-    visited[spawn.idx] = 1;
-    q[qt++] = spawn.idx;
+    const performFloodFill = (startIdx) => {
+        const queue = [startIdx];
+        const v = new Uint8Array(mapW * mapH);
+        v[startIdx] = 1;
+        let head = 0;
+        let count = 0;
+        while (head < queue.length) {
+            const first = queue[head++];
+            count++;
+            const x = first % mapW;
+            const y = (first / mapW) | 0;
+            for (let d = 0; d < 4; d++) {
+                const nx = x + dirs[d][0];
+                const ny = y + dirs[d][1];
+                if (nx >= 0 && ny >= 0 && nx < mapW && ny < mapH) {
+                    const ni = ny * mapW + nx;
+                    if (!blocked[ni] && !v[ni]) {
+                        v[ni] = 1;
+                        queue.push(ni);
+                    }
+                }
+            }
+        }
+        return { count, visited: v };
+    };
 
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    let flood = performFloodFill(spawn.idx);
+    visited = flood.visited;
+    reachableCount = flood.count;
 
-    let reachable = 0;
+    // If VERY low reachability, attempt to find a better spawn on a larger "island"
+    if (reachableCount < 10) {
+        console.warn(`[Validator] Player spawn at (${spawn.tx},${spawn.ty}) has very low reachability (${reachableCount} tiles). Searching for larger island...`);
+        let maxIslandSize = reachableCount;
+        let bestSpawnIdx = spawn.idx;
+        let bestVisited = visited;
 
-    onProgress?.({ phase: "bfs-start" });
-
-    while (qh < qt) {
-        const idx = q[qh++];
-        reachable++;
-
-        const x = idx % mapW;
-        const y = (idx / mapW) | 0;
-
-        for (let d = 0; d < 4; d++) {
-            const nx = x + dirs[d][0];
-            const ny = y + dirs[d][1];
-            if (nx < 0 || ny < 0 || nx >= mapW || ny >= mapH) continue;
-            const ni = tileIndex(nx, ny, mapW);
-            if (visited[ni] || blocked[ni]) continue;
-            visited[ni] = 1;
-            q[qt++] = ni;
+        // Sample some points to find a better island
+        for (let i = 0; i < 200; i++) {
+            const rx = Math.floor(Math.random() * mapW);
+            const ry = Math.floor(Math.random() * mapH);
+            const ridx = ry * mapW + rx;
+            if (!blocked[ridx]) {
+                const f = performFloodFill(ridx);
+                if (f.count > maxIslandSize) {
+                    maxIslandSize = f.count;
+                    bestSpawnIdx = ridx;
+                    bestVisited = f.visited;
+                    if (maxIslandSize > (mapW * mapH * 0.1)) break; // Found a big enough one
+                }
+            }
         }
 
-        if ((reachable & 4095) === 0) onProgress?.({ phase: "bfs", reachable });
+        if (bestSpawnIdx !== spawn.idx) {
+            const bx = bestSpawnIdx % mapW;
+            const by = (bestSpawnIdx / mapW) | 0;
+            report.warnings.push(`Relocated spawn to larger island at (${bx},${by}) size=${maxIslandSize}.`);
+            spawn = { tx: bx, ty: by, idx: bestSpawnIdx, x: bx * tw + tw / 2, y: by * th + th / 2 };
+            visited = bestVisited;
+            reachableCount = maxIslandSize;
+        }
     }
 
-    report.stats.reachableTiles = reachable;
-    report.stats.reachablePercent = `${((reachable / total) * 100).toFixed(1)}%`;
+    report.stats.reachableTiles = reachableCount;
+    const walkableTiles = (mapW * mapH - report.stats.tileCollisions) || 1;
+    report.stats.reachablePercent = `${((reachableCount / walkableTiles) * 100).toFixed(1)}%`;
 
     // ---------- Require important objects reachable ----------
     function requireReachable(layer, layerName) {
@@ -507,6 +583,11 @@ export async function validateTiledMap({
                             }
                         }
                     }
+
+                    // RELAXED REACHABILITY: If reachable area is small (<5%), allow spawning anyway as BFS fallback in Game.js will handle it.
+                    const isReachableEnough = visited[idx] || (reachableCount / (total - report.stats.tileCollisions) < 0.05);
+                    if (!isReachableEnough) continue;
+
                     if (openTiles / totalTiles < 0.4) continue; // Too cramped
 
                     // Generate random waypoints that are also reachable
@@ -521,7 +602,9 @@ export async function validateTiledMap({
 
                             if (wpTileX >= 0 && wpTileY >= 0 && wpTileX < mapW && wpTileY < mapH) {
                                 const wpIdx = wpTileY * mapW + wpTileX;
-                                if (!blocked[wpIdx] && visited[wpIdx]) {
+                                // RELAXED WP REACHABILITY
+                                const wpReachable = visited[wpIdx] || (reachableCount / (total - report.stats.tileCollisions) < 0.05);
+                                if (!blocked[wpIdx] && wpReachable) {
                                     waypoints.push({ x: wpX, y: wpY, tileX: wpTileX, tileY: wpTileY });
                                     break;
                                 }
@@ -566,6 +649,12 @@ export async function validateTiledMap({
         islandMark,
         microGapTiles,
         chokepoints,
+        spawn: {
+            tx: spawn.tx,
+            ty: spawn.ty,
+            x: spawn.tx * tw + tw / 2,
+            y: spawn.ty * th + th / 2
+        },
         validatedNPCSpawns, // Pre-validated NPC positions for Game scene
     };
 

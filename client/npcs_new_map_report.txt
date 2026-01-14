@@ -1,0 +1,11 @@
+
+> detective-client@0.0.0 qa:npcs
+> node qa/qa-npcs.js
+
+≡ƒñû Running QA: NPC Spawning Logic...
+
+--- NPC Analysis ---
+Validated Spawns: 0
+Failed Spawns:    35
+Γ¥î FAILURE: Expected 35 NPCs, only found valid spots for 0
+   (Map might be too crowded or blocked)

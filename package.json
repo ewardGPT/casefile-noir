@@ -1,0 +1,7 @@
+{
+    "name": "hackathon-winner",
+    "private": true,
+    "scripts": {
+        "check": "node projectHealthCheck.js && npm --prefix client run build"
+    }
+}

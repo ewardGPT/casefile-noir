@@ -44,7 +44,7 @@ if (!global.performance) {
 async function runAnalysis() {
     try {
         const report = await validateTiledMap({
-            mapUrl: "/assets/maps/world.json",
+            mapUrl: "/assets/maps/victorian/city_map_split.json",
             onProgress: () => { } // silence progress
         });
 

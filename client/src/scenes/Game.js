@@ -56,7 +56,60 @@ export default class GameScene extends Phaser.Scene {
         let map; // Hoist for use outside try-catch
         try {
             map = this.make.tilemap({ key: 'city_map' });
+            this.map = map;
             console.log("Game.create: Tilemap created successfully. Layers found:", map.layers.map(l => l.name));
+            const tileLayerNames = map.layers.map(l => l.name);
+            const objectLayerNames = map.objects ? map.objects.map(o => o.name) : [];
+            const allLayerNames = [...tileLayerNames, ...objectLayerNames];
+            console.log("NPC DEBUG: All Tiled layer names:", allLayerNames);
+
+            const findClosestLayerNames = (target, names) => {
+                const loweredTarget = target.toLowerCase();
+                const scored = names.map((name) => {
+                    const lower = name.toLowerCase();
+                    let score = 0;
+                    if (lower.includes(loweredTarget)) score += 100;
+                    for (let i = 0; i < Math.min(lower.length, loweredTarget.length); i++) {
+                        if (lower[i] === loweredTarget[i]) score += 1;
+                    }
+                    score -= Math.abs(lower.length - loweredTarget.length);
+                    return { name, score };
+                });
+                return scored.sort((a, b) => b.score - a.score).slice(0, 3).map((item) => item.name);
+            };
+
+            const npcLayer = map.getObjectLayer('NPCs');
+            if (!npcLayer) {
+                const closest = findClosestLayerNames('NPCs', objectLayerNames);
+                console.warn("NPC DEBUG: No object layer named 'NPCs'. Closest object layers:", closest);
+            } else {
+                console.log(`NPC DEBUG: 'NPCs' layer found with ${npcLayer.objects.length} objects.`);
+                this.npcExpectedKeys = [];
+                npcLayer.objects.forEach((obj, idx) => {
+                    const props = {};
+                    (obj.properties || []).forEach((prop) => {
+                        props[prop.name] = prop.value;
+                    });
+                    console.log(
+                        `NPC DEBUG [${idx}]: name=${obj.name || '(none)'} type=${obj.type || '(none)'} x=${obj.x} y=${obj.y}`,
+                        props
+                    );
+                    const spriteKey = props.spriteKey || props.npcKey || props.npcType || obj.type || obj.name;
+                    const resolvedKey = spriteKey ? this.resolveNpcTextureKey(spriteKey) : null;
+                    if (resolvedKey) {
+                        this.npcExpectedKeys.push(resolvedKey);
+                    }
+                    if (resolvedKey) {
+                        const hasTexture = this.textures.exists(resolvedKey);
+                        console.log(`NPC DEBUG: texture check for '${resolvedKey}':`, hasTexture ? 'OK' : 'MISSING');
+                        if (!hasTexture) {
+                            console.warn("NPC DEBUG: Loaded texture keys:", Object.keys(this.textures.list));
+                        }
+                    } else {
+                        console.warn("NPC DEBUG: No spriteKey found for NPC object. Loaded texture keys:", Object.keys(this.textures.list));
+                    }
+                });
+            }
 
             // Add Tilesets: addTilesetImage(tilesetNameInTiled, phaserKey)
             console.log("Game.create: Adding tilesets...");
@@ -92,6 +145,7 @@ export default class GameScene extends Phaser.Scene {
             // Create Layers
             console.log("Game.create: Creating layers...");
             this.layers = {};
+            this.collidableLayers = [];
 
             // Dynamically load all layers from the map
             map.layers.forEach(layerData => {
@@ -108,12 +162,14 @@ export default class GameScene extends Phaser.Scene {
                     // STRICT BOUNDARY CONTROL: "Get every block and every layer"
                     // Strategy: Collide with EVERYTHING unless it's explicitly a "Ground" or "Floor" layer.
                     // This is safer than a whitelist.
-                    const isSafe = name.includes('Ground') || name.includes('Floor') || name.includes('Street') || name.includes('Path') || name.includes('Grass') || name.includes('Sand') || name.includes('Water') || name.includes('Dirt') || name.startsWith('Terrain');
+                    const isSafe = name.includes('Ground') || name.includes('Floor') || name.includes('Street') || name.includes('Path') || name.includes('Grass') || name.includes('Sand') || name.includes('Water') || name.includes('Dirt') || name.startsWith('Terrain') || name.startsWith('Trn_') || name.startsWith('Bkg');
+                    const forceBlocked = name === 'Trn_3';
 
-                    if (!isSafe) {
+                    if ((!isSafe || forceBlocked) && name !== 'Trn_1' && name !== 'Trn_2') {
                         // It's a wall, building, roof, prop, deco, etc.
                         layer.setCollisionByExclusion([-1]);
                         console.log(`Game.create: BLOCKED layer ${name}`);
+                        this.collidableLayers.push(layer);
 
                         // Set depth high for "overhead" layers like Roofs, but watch out for Trees hiding player.
                         if (name.includes('Roof') || name.includes('Top')) {
@@ -132,6 +188,7 @@ export default class GameScene extends Phaser.Scene {
             this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
             this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
             console.log("Game.create: Bounds set to", map.widthInPixels, map.heightInPixels);
+            this.mapLoaded = true;
 
         } catch (error) {
             console.error("Game.create FATAL ERROR:", error);
@@ -148,8 +205,10 @@ export default class GameScene extends Phaser.Scene {
         // --- 3. Entities (Spawn Points) ---
         // Just spawn in middle for now if no "Entities" layer found
         // Use a safer street coordinate (approximate based on map)
-        const spawnX = 200;
-        const spawnY = 300; // Street level, top-left ish
+        const fallbackSpawn = { x: 200, y: 300 };
+        const debugSpawn = this.mapDebugData?.spawn;
+        const spawnX = debugSpawn?.x || fallbackSpawn.x;
+        const spawnY = debugSpawn?.y || fallbackSpawn.y;
 
         this.player = this.physics.add.sprite(spawnX, spawnY, 'detective');
         this.player.setScale(1.0);  // Same scale as NPCs (both 64x64 frames now)
@@ -159,13 +218,46 @@ export default class GameScene extends Phaser.Scene {
         this.player.setDepth(10);
         this.lastDirection = 'down'; // Track direction for idle
 
-        // Collide with all building layers only
-        Object.keys(this.layers).forEach(key => {
-            if (key.startsWith('Bldg')) {
-                this.physics.add.collider(this.player, this.layers[key]);
-            }
+        // Collide with all layers that have collisions enabled
+        (this.collidableLayers || []).forEach((layer) => {
+            this.physics.add.collider(this.player, layer);
         });
         this.physics.add.collider(this.player, this.walls);
+
+        // --- NPC Debug Markers + Spawn Probe ---
+        const npcLayer = map.getObjectLayer('NPCs');
+        if (npcLayer) {
+            npcLayer.objects.forEach((obj) => {
+                const center = getObjectCenter(obj);
+                const marker = this.add.circle(center.x, center.y, 6, 0x00ff00, 0.9);
+                marker.setDepth(1000);
+            });
+            const firstNpc = npcLayer.objects[0];
+            if (firstNpc) {
+                const spriteKey = getProp(firstNpc, 'spriteKey') || getProp(firstNpc, 'npcKey') || getProp(firstNpc, 'npcType') || firstNpc.type || firstNpc.name || 'npc_1';
+                const resolvedKey = this.resolveNpcTextureKey(spriteKey);
+                if (resolvedKey) {
+                    console.log(`NPC DEBUG: Spawning probe NPC '${resolvedKey}' at player position.`);
+                    if (!this.textures.exists(resolvedKey)) {
+                        console.warn("NPC DEBUG: Probe NPC texture missing. Loaded keys:", Object.keys(this.textures.list));
+                    } else {
+                        const probe = this.add.sprite(this.player.x, this.player.y, resolvedKey);
+                        probe.setDepth(999);
+                        this.time.delayedCall(1500, () => probe.destroy());
+                    }
+                }
+            }
+        } else {
+            const fallbackKey = 'npc_1';
+            console.log(`NPC DEBUG: Spawning fallback probe NPC '${fallbackKey}' at player position.`);
+            if (!this.textures.exists(fallbackKey)) {
+                console.warn("NPC DEBUG: Fallback probe texture missing. Loaded keys:", Object.keys(this.textures.list));
+            } else {
+                const probe = this.add.sprite(this.player.x, this.player.y, fallbackKey);
+                probe.setDepth(999);
+                this.time.delayedCall(1500, () => probe.destroy());
+            }
+        }
 
         // --- 4. Interactables (Evidence / Suspects) ---
         this.interactables = this.physics.add.staticGroup();
@@ -292,6 +384,11 @@ export default class GameScene extends Phaser.Scene {
             }
         });
 
+        // Dev Health Check (F6)
+        this.input.keyboard.on('keydown-F6', () => {
+            this.debugHealthReport();
+        });
+
         // --- 9. UI ---
         this.notebookUI = new NotebookUI();
         this.notebookUI.setAccuseHandler((suspectId) => this.handleAccuse(suspectId));
@@ -312,6 +409,9 @@ export default class GameScene extends Phaser.Scene {
         // --- 11. NPCs ---
         this.npcs = [];
         this.spawnNPCs();
+        if (import.meta && import.meta.env && import.meta.env.DEV) {
+            this.debugHealthReport();
+        }
 
         // --- 12. Debug Overlay (F2 toggle) ---
         const debugData = this.registry.get("mapDebugData");
@@ -324,93 +424,48 @@ export default class GameScene extends Phaser.Scene {
         }
     }
 
-    spawnNPCs() {
-        // Get pre-validated NPC spawns from map validator
-        const debugData = this.registry.get("mapDebugData");
-        const validatedSpawns = debugData?.validatedNPCSpawns;
-
-        if (validatedSpawns && validatedSpawns.length > 0) {
-            console.log(`Using ${validatedSpawns.length} pre-validated NPC spawns`);
-
-            // Initialize A* pathfinder for NPCs
-            if (debugData.blocked && debugData.mapW && debugData.mapH) {
-                this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
-                this.mapTileWidth = debugData.tw;
-                this.mapTileHeight = debugData.th;
-            }
-
-            for (const spawn of validatedSpawns) {
-                const npc = this.physics.add.sprite(spawn.x, spawn.y, spawn.npcType);
-                npc.setScale(1.0);
-                npc.body.setSize(32, 24);
-                npc.body.setOffset(16, 40);
-                npc.setDepth(9);
-                npc.setCollideWorldBounds(true);
-
-                // Use pre-validated waypoints
-                npc.npcKey = spawn.npcType;
-                npc.waypoints = spawn.waypoints.map(wp => ({ x: wp.x, y: wp.y }));
-                npc.currentWaypointIndex = 0;
-                npc.activePath = null;
-                npc.direction = 'down';
-                npc.speed = Phaser.Math.Between(40, 60);
-                npc.pauseTime = Phaser.Math.Between(500, 2000);
-
-                // Track for stuck detection
-                npc.lastX = spawn.x;
-                npc.lastY = spawn.y;
-                npc.stuckFrames = 0;
-
-                // Collide with buildings
-                Object.keys(this.layers).forEach(key => {
-                    if (key.startsWith('Bldg')) {
-                        this.physics.add.collider(npc, this.layers[key]);
-                    }
-                });
-
-                // Freeze collision with player
-                this.physics.add.overlap(npc, this.player, () => {
-                    npc.pauseTime = 1000;
-                    npc.setVelocity(0);
-                    npc.activePath = null;
-                });
-
-                this.npcs.push(npc);
-            }
-
-            console.log(`✅ Spawned ${this.npcs.length} NPCs with validated positions`);
-        } else {
-            // Fallback: spawn with basic random positions
-            console.warn("No pre-validated NPC spawns found, using fallback");
-            this.spawnNPCsFallback();
-        }
-    }
 
     spawnNPCsFallback() {
-        // Fallback NPC spawning (original method)
-        const npcTypes = [];
-        for (let i = 1; i <= 35; i++) {
-            npcTypes.push(`npc_${i}`);
-        }
+        console.log("Game: Spawning fallback NPCs...");
+        const npcTypes = Array.from({ length: 35 }, (_, i) => `npc_${i + 1}`);
+        const npcCount = 10;
 
-        const spawnZones = [
-            { x: 1800, y: 1800, width: 500, height: 500 },
-            { x: 1500, y: 1500, width: 400, height: 400 },
-        ];
-
-        const npcCount = 5;
-
+        // Try to find safe spots around the player if no zones defined
         for (let i = 0; i < npcCount; i++) {
-            const zone = spawnZones[i % spawnZones.length];
-            const spawnX = zone.x + Phaser.Math.Between(50, zone.width - 50);
-            const spawnY = zone.y + Phaser.Math.Between(50, zone.height - 50);
-            const npcKey = npcTypes[i % npcTypes.length];
+            let sx = this.player.x + Phaser.Math.Between(-400, 400);
+            let sy = this.player.y + Phaser.Math.Between(-400, 400);
 
-            const npc = this.physics.add.sprite(spawnX, spawnY, npcKey);
-            npc.setScale(1.0);
-            npc.body.setSize(32, 24);
-            // ... (legacy setup)
+            const tx = this.map.worldToTileX(sx);
+            const ty = this.map.worldToTileY(sy);
+
+            if (this.isTileBlocked(tx, ty)) {
+                const free = this.findNearestWalkableTile(tx, ty);
+                if (free) {
+                    sx = (free.tx * this.mapTileWidth) + (this.mapTileWidth / 2);
+                    sy = (free.ty * this.mapTileHeight) + (this.mapTileHeight / 2);
+                }
+            }
+
+            const npcKey = this.resolveNpcTextureKey(npcTypes[i % npcTypes.length]);
+            const npc = this.physics.add.sprite(sx, sy, npcKey);
+            npc.body.setSize(16, 16);
+            npc.body.setOffset(8, 16);
+            npc.setPushable(true);
+            npc.setDepth(999);
+
+            const controller = new NPCController(this, npc, this.astar, {
+                speed: 40,
+                wanderRadius: 100,
+                minPauseMs: 1000,
+                maxPauseMs: 4000
+            });
+            npc.controller = controller;
+            npc.npcKey = npcKey;
+
+            (this.collidableLayers || []).forEach(l => this.physics.add.collider(npc, l));
+            this.physics.add.collider(npc, this.player);
             this.npcs.push(npc);
+            controller.updateAnimation(0, 0);
         }
     }
 
@@ -424,11 +479,6 @@ export default class GameScene extends Phaser.Scene {
         console.log("---- DIAGNOSTIC STEP 2 & 3: SPANWS ----");
         console.log(`Validated Spawns Count: ${validatedSpawns.length}`);
 
-        if (validatedSpawns.length === 0) {
-            console.warn("Game.spawnNPCs: No validated spawns found! Using fallback.");
-            return this.spawnNPCsFallback();
-        }
-
         // Initialize AStar if not already done
         if (debugData.blocked && debugData.mapW && debugData.mapH) {
             if (!this.astar) {
@@ -438,15 +488,36 @@ export default class GameScene extends Phaser.Scene {
             this.blockedTiles = debugData.blocked;
             this.mapTileWidth = debugData.tw;
             this.mapTileHeight = debugData.th;
+            this.mapW = debugData.mapW;
+            this.mapH = debugData.mapH;
+        }
+
+        if (validatedSpawns.length === 0) {
+            console.warn("Game.spawnNPCs: No validated spawns found! Using fallback.");
+            return this.spawnNPCsFallback();
         }
 
         console.log(`Game: Spawning ${validatedSpawns.length} validated NPCs.`);
 
         validatedSpawns.forEach((spawn, i) => {
-            if (i < 10) console.log(`Spawn ${i}: ${spawn.npcType} at ${spawn.x},${spawn.y}`); // Log first 10
-            // ...
-            // Create Sprite
-            const npc = this.physics.add.sprite(spawn.x, spawn.y, spawn.npcType);
+            let sx = spawn.x;
+            let sy = spawn.y;
+
+            // TILE GUARD: Convert world to tile coords and check if blocked
+            const tx = this.map.worldToTileX(sx);
+            const ty = this.map.worldToTileY(sy);
+
+            if (this.isTileBlocked(tx, ty)) {
+                console.error(`[NPC Spawn] Blocked tile found for ${spawn.npcType} at world(${sx},${sy}) -> tile(${tx},${ty}). offsetting to nearest free tile.`);
+                const free = this.findNearestWalkableTile(tx, ty);
+                if (free) {
+                    sx = (free.tx * this.mapTileWidth) + (this.mapTileWidth / 2);
+                    sy = (free.ty * this.mapTileHeight) + (this.mapTileHeight / 2);
+                }
+            }
+
+            const npcKey = this.resolveNpcTextureKey(spawn.npcType);
+            const npc = this.physics.add.sprite(sx, sy, npcKey);
 
             // Adjust body size for top-down perspective
             npc.body.setSize(16, 16);
@@ -461,16 +532,10 @@ export default class GameScene extends Phaser.Scene {
                 maxPauseMs: 3500
             });
             npc.controller = controller;
+            npc.npcKey = npcKey;
 
             // Enable Collisions with map layers
-            // We already set collisions on the layers themselves, but we need to ensure the sprite collides
-            Object.keys(this.layers).forEach(key => {
-                // Only collide with layers we marked as blocked
-                const layer = this.layers[key];
-                if (layer.collisionMask && layer.collisionMask.size > 0) {
-                    this.physics.add.collider(npc, layer);
-                }
-                // Or just brute force it as per "every block"
+            (this.collidableLayers || []).forEach((layer) => {
                 this.physics.add.collider(npc, layer);
             });
 
@@ -488,7 +553,90 @@ export default class GameScene extends Phaser.Scene {
             controller.updateAnimation(0, 0);
         });
 
-        console.log(`Game: Successfully spawned ${this.npcs.length} NPCs with depth 999.`);
+        console.log(`Game: Successfully spawned ${this.npcs.length} NPCs.`);
+    }
+
+    isTileBlocked(tx, ty) {
+        if (!this.blockedTiles || !this.mapW) return false;
+        if (tx < 0 || ty < 0 || tx >= this.mapW || ty >= this.mapH) return true;
+        return this.blockedTiles[ty * this.mapW + tx] === 1;
+    }
+
+    findNearestWalkableTile(tx, ty) {
+        if (!this.blockedTiles || !this.mapW) return null;
+
+        const mapW = this.mapW;
+        const mapH = this.mapH;
+        const blocked = this.blockedTiles;
+
+        // BFS to find nearest free tile
+        const queue = [{ tx, ty, d: 0 }];
+        const visited = new Set();
+        visited.add(`${tx},${ty}`);
+
+        let head = 0;
+        while (head < queue.length && queue.length < 400) {
+            const curr = queue[head++];
+
+            if (curr.tx >= 0 && curr.ty >= 0 && curr.tx < mapW && curr.ty < mapH) {
+                if (blocked[curr.ty * mapW + curr.tx] === 0) {
+                    return { tx: curr.tx, ty: curr.ty };
+                }
+            }
+
+            const neighbors = [
+                { tx: curr.tx, ty: curr.ty - 1 },
+                { tx: curr.tx, ty: curr.ty + 1 },
+                { tx: curr.tx - 1, ty: curr.ty },
+                { tx: curr.tx + 1, ty: curr.ty }
+            ];
+
+            for (const nb of neighbors) {
+                const key = `${nb.tx},${nb.ty}`;
+                if (!visited.has(key) && nb.tx >= 0 && nb.ty >= 0 && nb.tx < mapW && nb.ty < mapH) {
+                    visited.add(key);
+                    queue.push({ ...nb, d: curr.d + 1 });
+                }
+            }
+        }
+        return null;
+    }
+
+    resolveNpcTextureKey(rawKey) {
+        if (!rawKey) {
+            return this.getFallbackNpcKey();
+        }
+        if (this.textures.exists(rawKey)) {
+            return rawKey;
+        }
+        const normalizedMatch = /^npc_0*(\d+)$/i.exec(String(rawKey));
+        if (normalizedMatch) {
+            const normalized = `npc_${parseInt(normalizedMatch[1], 10)}`;
+            if (this.textures.exists(normalized)) {
+                console.warn(`NPC DEBUG: Normalized texture key '${rawKey}' -> '${normalized}'.`);
+                return normalized;
+            }
+        }
+        const numeric = parseInt(rawKey, 10);
+        if (!Number.isNaN(numeric)) {
+            const candidate = `npc_${numeric}`;
+            if (this.textures.exists(candidate)) {
+                console.warn(`NPC DEBUG: Mapped texture key '${rawKey}' -> '${candidate}'.`);
+                return candidate;
+            }
+        }
+        const fallback = this.getFallbackNpcKey();
+        if (fallback && fallback !== rawKey) {
+            console.warn(`NPC DEBUG: Falling back from '${rawKey}' to '${fallback}'.`);
+            return fallback;
+        }
+        return rawKey;
+    }
+
+    getFallbackNpcKey() {
+        const keys = Object.keys(this.textures.list || {});
+        const npcKey = keys.find((key) => key.startsWith('npc_'));
+        return npcKey || null;
     }
 
     updateNPCs(delta) {
@@ -588,6 +736,61 @@ export default class GameScene extends Phaser.Scene {
             npc.lastX = npc.x;
             npc.lastY = npc.y;
         });
+    }
+
+    showNPCDebug() {
+        if (!this.npcDebugGroup) {
+            this.npcDebugGroup = this.add.group();
+            this.npcs.forEach(npc => {
+                const text = this.add.text(npc.x, npc.y - 20, npc.npcKey, { font: '10px monospace', fill: '#00ff00', backgroundColor: '#000000' });
+                text.setDepth(10000);
+                this.npcDebugGroup.add(text);
+                npc.debugText = text;
+            });
+        }
+        this.npcDebugGroup.setVisible(true);
+        this.physics.world.createDebugGraphic();
+        this.physics.world.drawDebug = true;
+    }
+
+    hideNPCDebug() {
+        if (this.npcDebugGroup) {
+            this.npcDebugGroup.setVisible(false);
+        }
+        this.physics.world.drawDebug = false;
+        this.physics.world.debugGraphic.clear();
+    }
+
+    debugHealthReport() {
+        const sceneKeys = Object.keys(this.scene?.manager?.keys || {});
+        const bounds = this.physics?.world?.bounds;
+        const mapWidth = this.map?.widthInPixels || bounds?.width || 0;
+        const mapHeight = this.map?.heightInPixels || bounds?.height || 0;
+        const tileWidth = this.map?.tileWidth || this.mapTileWidth || 32;
+        const tileHeight = this.map?.tileHeight || this.mapTileHeight || 32;
+        const playerTile = this.player
+            ? { x: Math.floor(this.player.x / tileWidth), y: Math.floor(this.player.y / tileHeight) }
+            : null;
+        const npcCount = this.npcs ? this.npcs.length : 0;
+
+        const expectedKeys = this.npcExpectedKeys || [];
+        const missingExpected = expectedKeys.filter((key) => key && !this.textures.exists(key));
+        const npcKeys = (this.npcs || []).map((npc) => npc.texture?.key).filter(Boolean);
+        const missingNpcKeys = npcKeys.filter((key) => !this.textures.exists(key));
+        const missingKeys = Array.from(new Set([...missingExpected, ...missingNpcKeys]));
+
+        console.log("=== DEV HEALTH REPORT ===");
+        console.log("Scene keys:", sceneKeys);
+        console.log("Map bounds (px):", { width: mapWidth, height: mapHeight });
+        console.log("Player spawn tile:", playerTile);
+        console.log("NPC count:", npcCount);
+        if (missingKeys.length) {
+            console.warn("Missing NPC texture keys:", missingKeys);
+            console.log("Loaded texture keys:", Object.keys(this.textures.list || {}));
+        } else {
+            console.log("Missing NPC texture keys: none");
+        }
+        console.log("==========================");
     }
 
     createSprintTrail() {
@@ -1040,4 +1243,8 @@ function getProp(obj, key) {
     if (!obj.properties) return null;
     const p = obj.properties.find(p => p.name === key);
     return p ? p.value : null;
+}
+
+function truncate(value) {
+    return Math.round(value * 100) / 100;
 }
