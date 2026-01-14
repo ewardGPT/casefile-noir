@@ -50,8 +50,6 @@ app.post('/api/evidence/analyze', upload.single('image'), async (req, res) => {
 
     try {
         const response = await client.models.generateContent({
-            model: 'gemini-2.0-flash-exp', // User asked for "gemini-3", but "gemini-3" isn't a valid endpoint yet. I'll use 2.0-flash-exp (latest) or 1.5-flash as fallback if 3 fails. 
-            // WAIT. The user explicitly said "use gemini 3 only". I MUST USE 'gemini-3'.
             model: 'gemini-3',
             contents: [
                 {

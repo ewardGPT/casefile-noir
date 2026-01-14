@@ -26,6 +26,7 @@ export class NPCController {
         this.maxPauseMs = config.maxPauseMs || 3000;
         this.homeX = sprite.x;
         this.homeY = sprite.y;
+        this.tileSize = config.tileSize || 32;
 
         // State
         this.state = NPCState.IDLE;
@@ -87,25 +88,60 @@ export class NPCController {
 
             case NPCState.MOVING:
                 this.followPath();
-                if (this.scene.physics.world.drawDebug) {
+                // STEP 3: Draw path debug if enabled (F5 toggle)
+                if (this.scene.pathDebugActive) {
                     this.drawDebugPath();
+                } else if (this.scene.pathDebugGraphics) {
+                    this.scene.pathDebugGraphics.clear();
                 }
                 break;
         }
     }
 
     drawDebugPath() {
+        // STEP 3: Enhanced path debug with markers
         if (!this.activePath || this.activePath.length === 0) return;
-
-        const graphics = this.scene.physics.world.debugGraphic;
-        graphics.lineStyle(1, 0x00ff00, 0.5);
-
+        
+        // Use scene's path debug graphics if available, otherwise create one
+        if (!this.scene.pathDebugGraphics) {
+            this.scene.pathDebugGraphics = this.scene.add.graphics();
+            this.scene.pathDebugGraphics.setDepth(10000);
+            this.scene.pathDebugGraphics.setScrollFactor(1);
+        }
+        
+        const graphics = this.scene.pathDebugGraphics;
+        graphics.clear();
+        
+        // Draw path lines
+        graphics.lineStyle(2, 0x00ff00, 0.8);
         for (let i = this.currentPathIndex; i < this.activePath.length - 1; i++) {
             const nodeA = this.activePath[i];
             const nodeB = this.activePath[i + 1];
             graphics.lineBetween(
-                (nodeA.x + 0.5) * 32, (nodeA.y + 0.5) * 32,
-                (nodeB.x + 0.5) * 32, (nodeB.y + 0.5) * 32
+                (nodeA.x + 0.5) * this.tileSize, (nodeA.y + 0.5) * this.tileSize,
+                (nodeB.x + 0.5) * this.tileSize, (nodeB.y + 0.5) * this.tileSize
+            );
+        }
+        
+        // Draw path markers (circles at each waypoint)
+        graphics.fillStyle(0x00ff00, 0.6);
+        for (let i = this.currentPathIndex; i < this.activePath.length; i++) {
+            const node = this.activePath[i];
+            graphics.fillCircle(
+                (node.x + 0.5) * this.tileSize,
+                (node.y + 0.5) * this.tileSize,
+                4
+            );
+        }
+        
+        // Highlight current target
+        if (this.currentPathIndex < this.activePath.length) {
+            const currentNode = this.activePath[this.currentPathIndex];
+            graphics.fillStyle(0xffff00, 0.8);
+            graphics.fillCircle(
+                (currentNode.x + 0.5) * this.tileSize,
+                (currentNode.y + 0.5) * this.tileSize,
+                6
             );
         }
     }
@@ -118,9 +154,9 @@ export class NPCController {
     }
 
     decideNextMove() {
-        // 80% chance to wander, 20% wait more
-        if (Math.random() < 0.2) {
-            this.enterPause();
+        // 5% chance to stay paused longer, 95% chance to wander
+        if (Math.random() < 0.05) {
+            this.enterPause(Phaser.Math.Between(500, 1500));
             return;
         }
 
@@ -135,10 +171,10 @@ export class NPCController {
 
     calculatePath(targetX, targetY) {
         // Convert to tiles
-        const startTx = Math.floor(this.sprite.x / 32);
-        const startTy = Math.floor(this.sprite.y / 32);
-        const targetTx = Math.floor(targetX / 32);
-        const targetTy = Math.floor(targetY / 32);
+        const startTx = Math.floor(this.sprite.x / this.tileSize);
+        const startTy = Math.floor(this.sprite.y / this.tileSize);
+        const targetTx = Math.floor(targetX / this.tileSize);
+        const targetTy = Math.floor(targetY / this.tileSize);
 
         if (!this.astar) {
             // Fallback if no A*
@@ -172,8 +208,8 @@ export class NPCController {
         }
 
         const node = this.activePath[this.currentPathIndex];
-        const targetX = (node.x + 0.5) * 32; // Center of tile
-        const targetY = (node.y + 0.5) * 32;
+        const targetX = (node.x + 0.5) * this.tileSize; // Center of tile
+        const targetY = (node.y + 0.5) * this.tileSize;
 
         const dx = targetX - this.sprite.x;
         const dy = targetY - this.sprite.y;

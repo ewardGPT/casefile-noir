@@ -11,14 +11,40 @@ export default class StartMenu extends Phaser.Scene {
     create() {
         const { width, height } = this.scale;
 
-        // --- Validation Status UI ---
+        // Defensive check: clean up existing listeners if scene is restarting
+        if (this.input && this.input.keyboard) {
+            this.input.keyboard.removeAllListeners("keydown-ENTER");
+        }
+        if (this.time) {
+            this.time.removeAllEvents();
+        }
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
+        
+        // Load sound toggle state from localStorage
+        this.soundEnabled = localStorage.getItem('soundEnabled') !== 'false'; // Default to true
+
+        // --- Validation Status UI with Loading Spinner ---
         this.validationText = this.add.text(width / 2, height - 70, "Validating map...", {
-            fontFamily: "monospace",
+            fontFamily: "'Georgia', serif",
             fontSize: "16px",
             color: "#cbd5e1",
             backgroundColor: "#0b1220",
             padding: { left: 10, right: 10, top: 6, bottom: 6 },
         }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+        
+        // Loading spinner (simple rotating circle)
+        this.loadingSpinner = this.add.circle(width / 2, height - 100, 8, 0x4ade80, 0.8);
+        this.loadingSpinner.setScrollFactor(0);
+        this.loadingSpinner.setDepth(201);
+        this.tweens.add({
+            targets: this.loadingSpinner,
+            rotation: Math.PI * 2,
+            duration: 1000,
+            repeat: -1,
+            ease: 'Linear'
+        });
 
         // Run map validation async
         this.runMapValidation();
@@ -202,15 +228,34 @@ export default class StartMenu extends Phaser.Scene {
             });
 
             btn.on("pointerdown", () => {
-                // Click feedback
+                // Click feedback with sound toggle check
                 this.tweens.add({
                     targets: btn,
-                    scaleX: 0.95,
-                    scaleY: 0.95,
-                    duration: 50,
+                    scaleX: 0.92,
+                    scaleY: 0.92,
+                    duration: 80,
                     yoyo: true,
                     ease: "Power2"
                 });
+                // Play click sound if enabled
+                if (this.soundEnabled) {
+                    // Simple click sound via Web Audio API (no asset needed)
+                    try {
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = audioContext.createOscillator();
+                        const gainNode = audioContext.createGain();
+                        oscillator.connect(gainNode);
+                        gainNode.connect(audioContext.destination);
+                        oscillator.frequency.value = 800;
+                        oscillator.type = 'sine';
+                        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                        oscillator.start(audioContext.currentTime);
+                        oscillator.stop(audioContext.currentTime + 0.1);
+                    } catch (e) {
+                        // Ignore audio errors
+                    }
+                }
                 onClick();
             });
 
@@ -218,8 +263,42 @@ export default class StartMenu extends Phaser.Scene {
         };
 
         makeButton(height * 0.55, "▶  START GAME", () => this.startGame());
-        makeButton(height * 0.65, "?  HOW TO PLAY", () => this.scene.start("HowToPlay"));
-        makeButton(height * 0.75, "★  CREDITS", () => this.scene.start("Credits"));
+        makeButton(height * 0.65, "?  HOW TO PLAY", () => {
+            try {
+                this.scene.start("HowToPlay");
+            } catch (error) {
+                console.error("Failed to start HowToPlay scene:", error);
+                throw error;
+            }
+        });
+        makeButton(height * 0.75, "★  CREDITS", () => {
+            try {
+                this.scene.start("Credits");
+            } catch (error) {
+                console.error("Failed to start Credits scene:", error);
+                throw error;
+            }
+        });
+
+        // --- Sound Toggle Button ---
+        const soundIcon = this.soundEnabled ? '🔊' : '🔇';
+        const soundBtn = this.add.text(width - 30, 30, soundIcon, {
+            fontFamily: "'Georgia', serif",
+            fontSize: "24px",
+            color: this.soundEnabled ? "#4ade80" : "#6a6a6a",
+            backgroundColor: "#0a0f18",
+            padding: { left: 8, right: 8, top: 6, bottom: 6 },
+        }).setOrigin(1, 0);
+        soundBtn.setScrollFactor(0);
+        soundBtn.setDepth(102);
+        soundBtn.setInteractive({ useHandCursor: true });
+        
+        soundBtn.on("pointerdown", () => {
+            this.soundEnabled = !this.soundEnabled;
+            localStorage.setItem('soundEnabled', String(this.soundEnabled));
+            soundBtn.setText(this.soundEnabled ? '🔊' : '🔇');
+            soundBtn.setStyle({ color: this.soundEnabled ? "#4ade80" : "#6a6a6a" });
+        });
 
         // --- Footer ---
         const footer = this.add.text(width / 2, height - 30, "Press ENTER to start • Hackathon Build", {
@@ -230,8 +309,30 @@ export default class StartMenu extends Phaser.Scene {
         footer.setScrollFactor(0);
         footer.setDepth(102);
 
-        // Enter key to start
-        this.input.keyboard.once("keydown-ENTER", () => this.startGame());
+        // Enter key to start - store reference for cleanup
+        this.enterKeyHandler = () => this.startGame();
+        this.input.keyboard.once("keydown-ENTER", this.enterKeyHandler);
+    }
+
+    shutdown() {
+        // Clean up keyboard listeners
+        if (this.input && this.input.keyboard) {
+            this.input.keyboard.removeAllListeners("keydown-ENTER");
+        }
+        
+        // Clean up timed events
+        if (this.time) {
+            this.time.removeAllEvents();
+        }
+        
+        // Clean up tweens
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
+        
+        // Reset validation state
+        this.validationPassed = false;
+        this.mapDebugData = null;
     }
 
     update(time, delta) {
@@ -267,9 +368,14 @@ export default class StartMenu extends Phaser.Scene {
             console.warn("Cannot start: validation not passed yet");
             return;
         }
-        this.scene.start("Game", {
-            mapDebugData: this.mapDebugData
-        });
+        try {
+            this.scene.start("Game", {
+                mapDebugData: this.mapDebugData
+            });
+        } catch (error) {
+            console.error("Failed to start Game scene:", error);
+            throw error; // Re-throw to trigger error overlay
+        }
     }
 
     async runMapValidation() {
@@ -344,6 +450,7 @@ export default class StartMenu extends Phaser.Scene {
             console.groupEnd();
 
             // Store debug data for Game scene overlay
+            this.mapDebugData = report.debug; // MISSING ASSIGNMENT FIXED
             this.registry.set("mapDebugData", report.debug);
 
             // Pre-start NPC texture checks
@@ -381,16 +488,31 @@ export default class StartMenu extends Phaser.Scene {
 
             // Mark as passed - user must press START
             this.validationPassed = true;
-            this.validationText?.setText(`✅ MAP VALIDATED (${report.stats.reachablePercent} reachable) - Press START`);
+            const reach = report.stats.reachablePercent || "0%";
+            this.validationText?.setText(`✅ MAP VALIDATED (${reach} reachable) - Press START`);
             this.validationText?.setStyle({ color: "#4ade80", fontSize: "18px" });
+            
+            // Hide loading spinner
+            if (this.loadingSpinner) {
+                this.tweens.killTweensOf(this.loadingSpinner);
+                this.loadingSpinner.setVisible(false);
+            }
 
         } catch (e) {
             console.error("Map validation error:", e);
             this.validationText?.setText("🛑 Validation FAILED. Game blocked.");
             this.validationText?.setStyle({ color: "#ef4444" });
             this.validationPassed = false; // BLOCK START
+            
+            // Hide loading spinner
+            if (this.loadingSpinner) {
+                this.tweens.killTweensOf(this.loadingSpinner);
+                this.loadingSpinner.setVisible(false);
+            }
+            
             // Show error details on screen if possible, or trigger QA trap
-            throw e; // Will trigger window.onunhandledrejection in main.js
+            // Wrap in Promise rejection to trigger error overlay
+            Promise.reject(e).catch(() => {}); // Trigger unhandled rejection handler
         }
     }
 

@@ -89,6 +89,14 @@ export default class Credits extends Phaser.Scene {
 
         back.setInteractive({ useHandCursor: true });
 
+        // Defensive check: remove existing listeners if scene is restarting
+        if (this.input && this.input.keyboard) {
+            this.input.keyboard.removeAllListeners("keydown-ESC");
+        }
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
+
         back.on("pointerover", () => {
             this.tweens.add({
                 targets: back,
@@ -109,8 +117,43 @@ export default class Credits extends Phaser.Scene {
             back.setStyle({ backgroundColor: "#0a0f18", stroke: "#3a4a5a" });
         });
 
-        back.on("pointerdown", () => this.scene.start("StartMenu"));
+        back.on("pointerdown", () => {
+            try {
+                this.scene.start("StartMenu");
+            } catch (error) {
+                console.error("Failed to start StartMenu scene:", error);
+                throw error;
+            }
+        });
 
-        this.input.keyboard.once("keydown-ESC", () => this.scene.start("StartMenu"));
+        // Store button reference for cleanup
+        this.backButton = back;
+        this.escHandler = () => {
+            try {
+                this.scene.start("StartMenu");
+            } catch (error) {
+                console.error("Failed to start StartMenu scene:", error);
+                throw error;
+            }
+        };
+        this.input.keyboard.once("keydown-ESC", this.escHandler);
+    }
+
+    shutdown() {
+        // Clean up keyboard listeners
+        if (this.input && this.input.keyboard) {
+            this.input.keyboard.removeAllListeners("keydown-ESC");
+        }
+        
+        // Remove button listeners
+        if (this.backButton) {
+            this.backButton.removeAllListeners();
+            this.backButton = null;
+        }
+        
+        // Clean up tweens
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
     }
 }

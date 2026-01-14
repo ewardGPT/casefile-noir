@@ -15,16 +15,26 @@ import { checkContradictions } from '../api.js';
 import { MapDebugOverlay } from '../utils/mapDebugOverlay.js';
 import { AStarPathfinder } from '../utils/astarPathfinding.js';
 import { NPCController } from '../utils/npcController.js';
-
+import { AudioManager } from '../utils/audioManager.js';
+import { DayNightCycle } from '../utils/dayNightCycle.js';
+import { Minimap } from '../utils/minimap.js';
+import Phaser from 'phaser';
 
 export default class GameScene extends Phaser.Scene {
+    // STEP 2: NPC size + hitbox constants
+    static NPC_SCALE = 1.0;
+    static NPC_BODY_W = 16;
+    static NPC_BODY_H = 16;
+    static NPC_BODY_OFFSET_X = 8;
+    static NPC_BODY_OFFSET_Y = 16;
+
     constructor() {
         super('Game');
     }
 
     init(data) {
         console.log("Game.init started with data:", data);
-        this.mapDebugData = data.mapDebugData || {};
+        this.mapDebugData = data?.mapDebugData || this.registry.get("mapDebugData") || {};
 
         // --- NPC DIAGNOSTICS (User Step 1-8) ---
         // Step 1: will happen in create (layer logging)
@@ -38,6 +48,37 @@ export default class GameScene extends Phaser.Scene {
     }
 
     create() {
+        // Update QA scene tracking
+        if (window.__QA__) {
+            window.__QA__.updateScene('Game');
+        }
+
+        // Defensive check: clean up existing state if scene is restarting
+        if (this.input && this.input.keyboard) {
+            this.input.keyboard.removeAllListeners();
+        }
+        if (this.time) {
+            this.time.removeAllEvents();
+        }
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.stopFollow();
+        }
+
+        // Clean up NPCs from previous run
+        if (this.npcs) {
+            this.npcs.forEach(npc => {
+                if (npc.controller) npc.controller = null;
+                if (npc.debugText) npc.debugText.destroy();
+            });
+            this.npcs = [];
+        }
+
+        // Load sound toggle state
+        this.soundEnabled = localStorage.getItem('soundEnabled') !== 'false'; // Default to true
+
         loadGameState();
         this.caseSolution = {
             culpritId: 'suspect_1',
@@ -159,15 +200,23 @@ export default class GameScene extends Phaser.Scene {
                 if (layer) {
                     this.layers[name] = layer;
 
-                    // STRICT BOUNDARY CONTROL: "Get every block and every layer"
-                    // Strategy: Collide with EVERYTHING unless it's explicitly a "Ground" or "Floor" layer.
-                    // This is safer than a whitelist.
-                    const isSafe = name.includes('Ground') || name.includes('Floor') || name.includes('Street') || name.includes('Path') || name.includes('Grass') || name.includes('Sand') || name.includes('Water') || name.includes('Dirt') || name.startsWith('Terrain') || name.startsWith('Trn_') || name.startsWith('Bkg');
+                    const normalizedName = name.toLowerCase();
+                    const isSafe = normalizedName.includes('ground') || normalizedName.includes('floor') ||
+                        normalizedName.includes('street') || normalizedName.includes('path') ||
+                        normalizedName.includes('grass') || normalizedName.includes('sand') ||
+                        normalizedName.includes('water') || normalizedName.includes('dirt') ||
+                        normalizedName.includes('stair') || normalizedName.includes('step') ||
+                        normalizedName.includes('walk') || normalizedName.includes('road') ||
+                        name.startsWith('Terrain') || name.startsWith('Trn_') || name.startsWith('Bkg');
+
                     const forceBlocked = name === 'Trn_3';
 
                     if ((!isSafe || forceBlocked) && name !== 'Trn_1' && name !== 'Trn_2') {
                         // It's a wall, building, roof, prop, deco, etc.
+                        // Use setCollisionByExclusion to ensure no micro gaps - all non-empty tiles collide
                         layer.setCollisionByExclusion([-1]);
+                        // Ensure collision is enabled
+                        layer.setCollisionByProperty({ collides: true }, true);
                         console.log(`Game.create: BLOCKED layer ${name}`);
                         this.collidableLayers.push(layer);
 
@@ -184,10 +233,14 @@ export default class GameScene extends Phaser.Scene {
             });
             console.log("Game.create: Layers done.");
 
-            // World Bounds
-            this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-            this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-            console.log("Game.create: Bounds set to", map.widthInPixels, map.heightInPixels);
+            // World Bounds - Always match map size exactly
+            const mapWidth = map.widthInPixels;
+            const mapHeight = map.heightInPixels;
+            this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
+            this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
+            // Store bounds for validation
+            this.mapBounds = { width: mapWidth, height: mapHeight };
+            console.log("Game.create: Bounds set to", mapWidth, mapHeight);
             this.mapLoaded = true;
 
         } catch (error) {
@@ -203,12 +256,90 @@ export default class GameScene extends Phaser.Scene {
         // map.setCollisionByProperty({ collides: true }); 
 
         // --- 3. Entities (Spawn Points) ---
-        // Just spawn in middle for now if no "Entities" layer found
-        // Use a safer street coordinate (approximate based on map)
-        const fallbackSpawn = { x: 200, y: 300 };
-        const debugSpawn = this.mapDebugData?.spawn;
-        const spawnX = debugSpawn?.x || fallbackSpawn.x;
-        const spawnY = debugSpawn?.y || fallbackSpawn.y;
+        // STEP 1: Player spawn MUST come from Tiled object layer "Entities" object named "Player" or "PlayerSpawn"
+        let spawnX, spawnY;
+        let spawnSource = 'UNKNOWN';
+
+        // Get tile dimensions (use map directly since mapTileWidth/Height may not be set yet)
+        const tileW = map.tileWidth || 32;
+        const tileH = map.tileHeight || 32;
+
+        const entitiesLayer = map.getObjectLayer('Entities');
+        if (entitiesLayer && entitiesLayer.objects) {
+            // Find Player or PlayerSpawn object
+            const playerSpawnObj = entitiesLayer.objects.find(obj =>
+                obj.name === 'Player' || obj.name === 'PlayerSpawn'
+            );
+
+            if (playerSpawnObj) {
+                // Use object center coordinates
+                const center = getObjectCenter(playerSpawnObj);
+                spawnX = center.x;
+                spawnY = center.y;
+                spawnSource = `Tiled Entities layer: ${playerSpawnObj.name}`;
+
+                // Validate spawn is not in blocked tile (only if blockedTiles is initialized)
+                if (this.blockedTiles && this.mapW && this.mapH) {
+                    const tileX = Math.floor(spawnX / tileW);
+                    const tileY = Math.floor(spawnY / tileH);
+                    if (this.isTileBlocked(tileX, tileY)) {
+                        console.error(`❌ VALIDATION FAIL: Player spawn at tile (${tileX}, ${tileY}) is BLOCKED!`);
+                        // Try to find nearest walkable tile
+                        const nearest = this.findNearestWalkableTile(tileX, tileY);
+                        if (nearest) {
+                            spawnX = nearest.tx * tileW + tileW / 2;
+                            spawnY = nearest.ty * tileH + tileH / 2;
+                            spawnSource += ` (moved to walkable tile ${nearest.tx},${nearest.ty})`;
+                            console.warn(`⚠️ Player spawn moved to walkable tile: (${nearest.tx}, ${nearest.ty})`);
+                        } else {
+                            console.error(`❌ CRITICAL: No walkable tile near spawn! Using fallback.`);
+                            spawnX = 200;
+                            spawnY = 300;
+                            spawnSource = 'FALLBACK (no walkable tile near spawn)';
+                        }
+                    }
+                }
+            } else {
+                // Check if there's any object in Entities layer as fallback
+                if (entitiesLayer.objects.length > 0) {
+                    const firstObj = entitiesLayer.objects[0];
+                    const center = getObjectCenter(firstObj);
+                    spawnX = center.x;
+                    spawnY = center.y;
+                    spawnSource = `FALLBACK: First object in Entities layer (${firstObj.name || 'unnamed'})`;
+                    console.warn(`⚠️ WARNING: No "Player" or "PlayerSpawn" object found in Entities layer. Using first object: ${firstObj.name || 'unnamed'}`);
+                } else {
+                    spawnX = 1000;
+                    spawnY = 1200;
+                    spawnSource = 'FALLBACK (Entities layer empty)';
+                    console.error(`❌ VALIDATION FAIL: Entities layer exists but has no objects! Using hardcoded fallback.`);
+                }
+            }
+        } else {
+            // No Entities layer - use hardcoded fallback
+            spawnX = 1000;
+            spawnY = 1200;
+            spawnSource = 'FALLBACK (no Entities layer)';
+            console.error(`❌ VALIDATION FAIL: No "Entities" object layer found! Using hardcoded fallback.`);
+        }
+
+        // --- 3.5. Spawn Points Tracking ---
+        this.spawnPoints = {};
+        if (entitiesLayer && entitiesLayer.objects) {
+            entitiesLayer.objects.forEach(obj => {
+                if (obj.name) {
+                    const center = getObjectCenter(obj);
+                    this.spawnPoints[obj.name] = center;
+                }
+            });
+        }
+
+        // Log spawn coordinates
+        const spawnTileX = Math.floor(spawnX / tileW);
+        const spawnTileY = Math.floor(spawnY / tileH);
+        console.log(`✅ Player spawn: ${spawnSource}`);
+        console.log(`   Pixel coords: (${spawnX.toFixed(2)}, ${spawnY.toFixed(2)})`);
+        console.log(`   Tile coords: (${spawnTileX}, ${spawnTileY})`);
 
         this.player = this.physics.add.sprite(spawnX, spawnY, 'detective');
         this.player.setScale(1.0);  // Same scale as NPCs (both 64x64 frames now)
@@ -216,7 +347,18 @@ export default class GameScene extends Phaser.Scene {
         this.player.body.setOffset(16, 40);  // Original offset
         this.player.setCollideWorldBounds(true);
         this.player.setDepth(10);
+        this.lastSafePos = new Phaser.Math.Vector2(spawnX, spawnY); // INITIALIZE FIX
         this.lastDirection = 'down'; // Track direction for idle
+
+        // Validate bounds are set correctly
+        if (this.mapBounds) {
+            const worldBounds = this.physics.world.bounds;
+            if (worldBounds.width !== this.mapBounds.width || worldBounds.height !== this.mapBounds.height) {
+                console.warn(`Bounds mismatch! Resetting to map size.`);
+                this.physics.world.setBounds(0, 0, this.mapBounds.width, this.mapBounds.height);
+                this.cameras.main.setBounds(0, 0, this.mapBounds.width, this.mapBounds.height);
+            }
+        }
 
         // Collide with all layers that have collisions enabled
         (this.collidableLayers || []).forEach((layer) => {
@@ -343,7 +485,7 @@ export default class GameScene extends Phaser.Scene {
 
         // --- 6. Prompt ---
         this.promptText = this.add.text(16, 16, 'Press E to interact', {
-            fontFamily: 'Arial',
+            fontFamily: "'Georgia', serif",
             fontSize: '14px',
             color: '#ffffff',
             backgroundColor: '#000000aa',
@@ -361,20 +503,24 @@ export default class GameScene extends Phaser.Scene {
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys('W,A,S,D');
         this.keyE = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+        this.lastTrailTime = 0;
 
-        // Debug Physics Toggle
-        this.input.keyboard.on('keydown-F3', () => {
+        // Debug Physics Toggle - store references for cleanup
+        this.f3Handler = () => {
             if (this.physics.world.drawDebug) {
                 this.physics.world.drawDebug = false;
-                this.physics.world.debugGraphic.clear();
+                if (this.physics.world.debugGraphic) {
+                    this.physics.world.debugGraphic.clear();
+                }
             } else {
                 this.physics.world.createDebugGraphic();
                 this.physics.world.drawDebug = true;
             }
-        });
+        };
+        this.input.keyboard.on('keydown-F3', this.f3Handler);
 
         // NPC Debug Toggle (F4)
-        this.input.keyboard.on('keydown-F4', () => {
+        this.f4Handler = () => {
             if (this.npcDebugActive) {
                 this.npcDebugActive = false;
                 this.hideNPCDebug();
@@ -382,12 +528,67 @@ export default class GameScene extends Phaser.Scene {
                 this.npcDebugActive = true;
                 this.showNPCDebug();
             }
-        });
+        };
+        this.input.keyboard.on('keydown-F4', this.f4Handler);
+
+        // Path Debug Toggle (F5) - STEP 3
+        this.pathDebugActive = false;
+        this.f5Handler = () => {
+            this.pathDebugActive = !this.pathDebugActive;
+            if (this.pathDebugActive) {
+                console.log('Path debug enabled - showing NPC paths');
+            } else {
+                console.log('Path debug disabled');
+            }
+        };
+        this.input.keyboard.on('keydown-F5', this.f5Handler);
 
         // Dev Health Check (F6)
-        this.input.keyboard.on('keydown-F6', () => {
+        this.f6Handler = () => {
             this.debugHealthReport();
-        });
+        };
+        this.input.keyboard.on('keydown-F6', this.f6Handler);
+
+        // --- 8.5. Audio System (STEP 4) ---
+        this.audio = new AudioManager(this);
+
+        // Start ambient music (if available)
+        // Note: Audio files need to be loaded in Boot.js
+        // For now, we'll start them if they exist
+        if (this.sound.get('noir_ambient_music')) {
+            this.audio.playMusic('noir_ambient_music');
+        }
+        if (this.sound.get('rain_ambient')) {
+            // Rain ambient can play alongside music
+            const rainSound = this.sound.get('rain_ambient');
+            if (rainSound) {
+                rainSound.setLoop(true);
+                rainSound.setVolume(this.audio.muted ? 0 : this.audio.volumes.master * this.audio.volumes.music * 0.3);
+                rainSound.play();
+            }
+        }
+
+        // M key to mute/unmute
+        this.muteHandler = () => {
+            const muted = this.audio.toggleMute();
+            console.log(`Audio ${muted ? 'muted' : 'unmuted'}`);
+        };
+        this.input.keyboard.on('keydown-M', this.muteHandler);
+
+        // --- 8.6. Day/Night Cycle System (STEP 5) ---
+        this.dayNightCycle = new DayNightCycle(this);
+        this.dayNightCycle.init();
+
+        // --- 8.7. Minimap System (STEP 6) ---
+        this.minimap = new Minimap(this);
+        this.minimap.init();
+
+        // F7 toggle minimap
+        this.f7Handler = () => {
+            const enabled = this.minimap.toggle();
+            console.log(`Minimap ${enabled ? 'enabled' : 'disabled'}`);
+        };
+        this.input.keyboard.on('keydown-F7', this.f7Handler);
 
         // --- 9. UI ---
         this.notebookUI = new NotebookUI();
@@ -406,6 +607,9 @@ export default class GameScene extends Phaser.Scene {
         // --- 10. Rain FX ---
         this.createRain();
 
+        // --- 10.5. Noir Overlay (Grain + Vignette) ---
+        this.createNoirOverlay();
+
         // --- 11. NPCs ---
         this.npcs = [];
         this.spawnNPCs();
@@ -417,11 +621,123 @@ export default class GameScene extends Phaser.Scene {
         const debugData = this.registry.get("mapDebugData");
         if (debugData) {
             this.mapDebugOverlay = new MapDebugOverlay(this, debugData);
-            this.input.keyboard.on("keydown-F2", () => {
-                this.mapDebugOverlay.toggle();
-            });
+            this.f2Handler = () => {
+                if (this.mapDebugOverlay) {
+                    this.mapDebugOverlay.toggle();
+                }
+            };
+            this.input.keyboard.on("keydown-F2", this.f2Handler);
             console.log("🗺️ Debug overlay ready: press F2 to toggle");
         }
+    }
+
+    shutdown() {
+        // Clean up keyboard listeners
+        if (this.input && this.input.keyboard) {
+            if (this.f2Handler) {
+                this.input.keyboard.off("keydown-F2", this.f2Handler);
+            }
+            if (this.f3Handler) {
+                this.input.keyboard.off("keydown-F3", this.f3Handler);
+            }
+            if (this.f4Handler) {
+                this.input.keyboard.off("keydown-F4", this.f4Handler);
+            }
+            if (this.f5Handler) {
+                this.input.keyboard.off("keydown-F5", this.f5Handler);
+            }
+            if (this.f6Handler) {
+                this.input.keyboard.off("keydown-F6", this.f6Handler);
+            }
+            if (this.muteHandler) {
+                this.input.keyboard.off("keydown-M", this.muteHandler);
+            }
+            if (this.f7Handler) {
+                this.input.keyboard.off("keydown-F7", this.f7Handler);
+            }
+        }
+
+        // Stop camera follow
+        if (this.cameras && this.cameras.main) {
+            this.cameras.main.stopFollow();
+        }
+
+        // Clean up timed events
+        if (this.time) {
+            this.time.removeAllEvents();
+        }
+
+        // Clean up tweens
+        if (this.tweens) {
+            this.tweens.killAll();
+        }
+
+        // Clean up NPCs
+        if (this.npcs) {
+            this.npcs.forEach(npc => {
+                if (npc.controller) {
+                    npc.controller = null;
+                }
+                if (npc.debugText) {
+                    npc.debugText.destroy();
+                }
+            });
+            this.npcs = [];
+        }
+
+        // Clean up debug groups
+        if (this.npcDebugGroup) {
+            this.npcDebugGroup.clear(true, true);
+            this.npcDebugGroup = null;
+        }
+        if (this.npcSpawnMarkers) {
+            this.npcSpawnMarkers.clear(true, true);
+            this.npcSpawnMarkers = null;
+        }
+
+        // Clean up debug overlay
+        if (this.mapDebugOverlay) {
+            this.mapDebugOverlay = null;
+        }
+
+        // Clean up noir overlay
+        if (this.noirVignette) {
+            this.noirVignette.destroy();
+            this.noirVignette = null;
+        }
+        if (this.noirGrain) {
+            this.noirGrain.destroy();
+            this.noirGrain = null;
+        }
+
+        // Clean up path debug graphics
+        if (this.pathDebugGraphics) {
+            this.pathDebugGraphics.destroy();
+            this.pathDebugGraphics = null;
+        }
+
+        // Clean up audio
+        if (this.audio) {
+            this.audio.destroy();
+            this.audio = null;
+        }
+
+        // Clean up day/night cycle
+        if (this.dayNightCycle) {
+            this.dayNightCycle.destroy();
+            this.dayNightCycle = null;
+        }
+
+        // Clean up minimap
+        if (this.minimap) {
+            this.minimap.destroy();
+            this.minimap = null;
+        }
+
+        // Reset state
+        this.npcDebugActive = false;
+        this.pathDebugActive = false;
+        this.mapLoaded = false;
     }
 
 
@@ -441,17 +757,23 @@ export default class GameScene extends Phaser.Scene {
             if (this.isTileBlocked(tx, ty)) {
                 const free = this.findNearestWalkableTile(tx, ty);
                 if (free) {
-                    sx = (free.tx * this.mapTileWidth) + (this.mapTileWidth / 2);
-                    sy = (free.ty * this.mapTileHeight) + (this.mapTileHeight / 2);
+                    const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
+                    const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
+                    sx = (free.tx * tileW) + (tileW / 2);
+                    sy = (free.ty * tileH) + (tileH / 2);
                 }
             }
 
             const npcKey = this.resolveNpcTextureKey(npcTypes[i % npcTypes.length]);
             const npc = this.physics.add.sprite(sx, sy, npcKey);
-            npc.body.setSize(16, 16);
-            npc.body.setOffset(8, 16);
+            // STEP 2: Apply normalized size + hitbox
+            npc.setScale(GameScene.NPC_SCALE);
+            npc.body.setSize(GameScene.NPC_BODY_W, GameScene.NPC_BODY_H);
+            npc.body.setOffset(GameScene.NPC_BODY_OFFSET_X, GameScene.NPC_BODY_OFFSET_Y);
             npc.setPushable(true);
-            npc.setDepth(999);
+            npc.setCollideWorldBounds(true); // Ensure NPCs respect world bounds
+            // Depth based on Y position for proper sorting
+            npc.setDepth(npc.y);
 
             const controller = new NPCController(this, npc, this.astar, {
                 speed: 40,
@@ -470,69 +792,133 @@ export default class GameScene extends Phaser.Scene {
     }
 
     async spawnNPCs() {
-        if (!this.mapLoaded) return;
-
-        // Use passed data from init()
-        const debugData = this.mapDebugData || {};
-        const validatedSpawns = debugData.validatedNPCSpawns || [];
-
-        console.log("---- DIAGNOSTIC STEP 2 & 3: SPANWS ----");
-        console.log(`Validated Spawns Count: ${validatedSpawns.length}`);
+        if (!this.mapLoaded) {
+            console.warn("Game.spawnNPCs: Map not loaded yet.");
+            return;
+        }
 
         // Initialize AStar if not already done
+        const debugData = this.mapDebugData || {};
         if (debugData.blocked && debugData.mapW && debugData.mapH) {
             if (!this.astar) {
                 this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
             }
             // STORE FOR TILE GUARD
             this.blockedTiles = debugData.blocked;
-            this.mapTileWidth = debugData.tw;
-            this.mapTileHeight = debugData.th;
+            this.mapTileWidth = debugData.tw || this.map?.tileWidth || 32;
+            this.mapTileHeight = debugData.th || this.map?.tileHeight || 32;
             this.mapW = debugData.mapW;
             this.mapH = debugData.mapH;
         }
 
-        if (validatedSpawns.length === 0) {
-            console.warn("Game.spawnNPCs: No validated spawns found! Using fallback.");
-            return this.spawnNPCsFallback();
+        // Always load from Tiled object layer "NPCs"
+        const npcLayer = this.map.getObjectLayer('NPCs');
+        if (!npcLayer) {
+            console.warn("Game.spawnNPCs: 'NPCs' object layer not found. NPCs will not spawn.");
+            return; // Fail gracefully
         }
 
-        console.log(`Game: Spawning ${validatedSpawns.length} validated NPCs.`);
+        if (!npcLayer.objects || npcLayer.objects.length === 0) {
+            console.warn("Game.spawnNPCs: 'NPCs' layer exists but has no objects.");
+            return; // Fail gracefully
+        }
 
-        validatedSpawns.forEach((spawn, i) => {
-            let sx = spawn.x;
-            let sy = spawn.y;
+        console.log(`Game.spawnNPCs: Found ${npcLayer.objects.length} NPC objects in Tiled layer.`);
 
-            // TILE GUARD: Convert world to tile coords and check if blocked
-            const tx = this.map.worldToTileX(sx);
-            const ty = this.map.worldToTileY(sy);
+        // Track spawned positions for min distance spacing
+        const spawnedPositions = [];
+        const minTileDistance = 2; // Minimum 2 tiles between spawns
+        const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
+        const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
 
-            if (this.isTileBlocked(tx, ty)) {
-                console.error(`[NPC Spawn] Blocked tile found for ${spawn.npcType} at world(${sx},${sy}) -> tile(${tx},${ty}). offsetting to nearest free tile.`);
-                const free = this.findNearestWalkableTile(tx, ty);
-                if (free) {
-                    sx = (free.tx * this.mapTileWidth) + (this.mapTileWidth / 2);
-                    sy = (free.ty * this.mapTileHeight) + (this.mapTileHeight / 2);
+        npcLayer.objects.forEach((obj, idx) => {
+            const center = getObjectCenter(obj);
+            let sx = center.x;
+            let sy = center.y;
+
+            // Extract spriteKey from object properties
+            const spriteKey = getProp(obj, 'spriteKey') || getProp(obj, 'npcKey') || getProp(obj, 'npcType') || obj.type || obj.name || 'npc_1';
+
+            // Validate spriteKey exists, fallback to npc_1 if missing
+            let npcKey = this.resolveNpcTextureKey(spriteKey);
+            if (!this.textures.exists(npcKey)) {
+                console.warn(`[NPC Spawn ${idx}] spriteKey '${spriteKey}' resolved to '${npcKey}' but texture missing. Falling back to npc_1.`);
+                npcKey = 'npc_1';
+                if (!this.textures.exists(npcKey)) {
+                    console.error(`[NPC Spawn ${idx}] Fallback npc_1 texture also missing! Skipping NPC.`);
+                    return; // Skip this NPC
                 }
             }
 
-            const npcKey = this.resolveNpcTextureKey(spawn.npcType);
+            // TILE GUARD: Check if spawn position is in blocked tile
+            const tx = Math.floor(sx / tileW);
+            const ty = Math.floor(sy / tileH);
+
+            if (this.isTileBlocked(tx, ty)) {
+                console.warn(`[NPC Spawn ${idx}] Blocked tile at (${tx},${ty}). Finding nearest free tile...`);
+                const free = this.findNearestWalkableTile(tx, ty);
+                if (free) {
+                    sx = (free.tx * tileW) + (tileW / 2);
+                    sy = (free.ty * tileH) + (tileH / 2);
+                } else {
+                    console.error(`[NPC Spawn ${idx}] Could not find free tile near (${tx},${ty}). Skipping NPC.`);
+                    return; // Skip this NPC
+                }
+            }
+
+            // MIN DISTANCE SPACING: Check distance to other spawned NPCs
+            const spawnTileX = Math.floor(sx / tileW);
+            const spawnTileY = Math.floor(sy / tileH);
+            let tooClose = false;
+
+            for (const pos of spawnedPositions) {
+                const tileDist = Math.abs(pos.tx - spawnTileX) + Math.abs(pos.ty - spawnTileY); // Manhattan distance
+                if (tileDist < minTileDistance) {
+                    console.warn(`[NPC Spawn ${idx}] Too close to existing spawn (${tileDist} tiles < ${minTileDistance}). Finding alternative position...`);
+                    // Try to find a nearby free position with proper spacing
+                    const alternative = this.findSpawnPositionWithSpacing(spawnTileX, spawnTileY, spawnedPositions, minTileDistance);
+                    if (alternative) {
+                        sx = (alternative.tx * tileW) + (tileW / 2);
+                        sy = (alternative.ty * tileH) + (tileH / 2);
+                        spawnedPositions.push({ tx: alternative.tx, ty: alternative.ty });
+                    } else {
+                        console.warn(`[NPC Spawn ${idx}] Could not find position with proper spacing. Skipping NPC.`);
+                        tooClose = true;
+                    }
+                    break;
+                }
+            }
+
+            if (tooClose) {
+                return; // Skip this NPC
+            }
+
+            // Record spawn position
+            spawnedPositions.push({ tx: spawnTileX, ty: spawnTileY });
+
+            // Create NPC sprite
             const npc = this.physics.add.sprite(sx, sy, npcKey);
 
-            // Adjust body size for top-down perspective
-            npc.body.setSize(16, 16);
-            npc.body.setOffset(8, 16);
+            // STEP 2: Apply normalized size + hitbox
+            npc.setScale(GameScene.NPC_SCALE);
+            npc.body.setSize(GameScene.NPC_BODY_W, GameScene.NPC_BODY_H);
+            npc.body.setOffset(GameScene.NPC_BODY_OFFSET_X, GameScene.NPC_BODY_OFFSET_Y);
             npc.setPushable(true);
+            npc.setCollideWorldBounds(true);
+            // Depth based on Y position for proper sorting
+            npc.setDepth(npc.y);
 
             // Create Controller
             const controller = new NPCController(this, npc, this.astar, {
                 speed: 40,
-                wanderRadius: 150,
+                wanderRadius: 200,
+                tileSize: tileW,
                 minPauseMs: 1000,
                 maxPauseMs: 3500
             });
             npc.controller = controller;
             npc.npcKey = npcKey;
+            npc.spawnIndex = idx; // Store for debug overlay
 
             // Enable Collisions with map layers
             (this.collidableLayers || []).forEach((layer) => {
@@ -545,7 +931,8 @@ export default class GameScene extends Phaser.Scene {
             this.npcs.push(npc);
 
             // VERIFICATION: Ensure visibility
-            npc.setDepth(999); // Force on top
+            // Depth based on Y position for proper sorting
+            npc.setDepth(npc.y);
             npc.setVisible(true);
             npc.setAlpha(1);
 
@@ -553,7 +940,61 @@ export default class GameScene extends Phaser.Scene {
             controller.updateAnimation(0, 0);
         });
 
-        console.log(`Game: Successfully spawned ${this.npcs.length} NPCs.`);
+        console.log(`Game.spawnNPCs: Successfully spawned ${this.npcs.length} NPCs from Tiled layer.`);
+    }
+
+    findSpawnPositionWithSpacing(startTx, startTy, existingPositions, minDistance) {
+        if (!this.blockedTiles || !this.mapW || !this.mapH) return null;
+
+        const mapW = this.mapW;
+        const mapH = this.mapH;
+        const blocked = this.blockedTiles;
+
+        // BFS to find nearest free position with proper spacing
+        const queue = [{ tx: startTx, ty: startTy, d: 0 }];
+        const visited = new Set();
+        visited.add(`${startTx},${startTy}`);
+
+        let head = 0;
+        while (head < queue.length && queue.length < 400) {
+            const curr = queue[head++];
+
+            // Check if position is valid and not blocked
+            if (curr.tx >= 0 && curr.ty >= 0 && curr.tx < mapW && curr.ty < mapH) {
+                const idx = curr.ty * mapW + curr.tx;
+                if (blocked[idx] === 0) {
+                    // Check spacing to existing positions
+                    let hasProperSpacing = true;
+                    for (const pos of existingPositions) {
+                        const tileDist = Math.abs(pos.tx - curr.tx) + Math.abs(pos.ty - curr.ty);
+                        if (tileDist < minDistance) {
+                            hasProperSpacing = false;
+                            break;
+                        }
+                    }
+                    if (hasProperSpacing) {
+                        return { tx: curr.tx, ty: curr.ty };
+                    }
+                }
+            }
+
+            // Add neighbors
+            const neighbors = [
+                { tx: curr.tx, ty: curr.ty - 1 },
+                { tx: curr.tx, ty: curr.ty + 1 },
+                { tx: curr.tx - 1, ty: curr.ty },
+                { tx: curr.tx + 1, ty: curr.ty }
+            ];
+
+            for (const nb of neighbors) {
+                const key = `${nb.tx},${nb.ty}`;
+                if (!visited.has(key) && nb.tx >= 0 && nb.ty >= 0 && nb.tx < mapW && nb.ty < mapH) {
+                    visited.add(key);
+                    queue.push({ ...nb, d: curr.d + 1 });
+                }
+            }
+        }
+        return null;
     }
 
     isTileBlocked(tx, ty) {
@@ -640,115 +1081,79 @@ export default class GameScene extends Phaser.Scene {
     }
 
     updateNPCs(delta) {
-        if (!this.astar || !this.mapTileWidth) return;
+        if (!this.npcs) return;
 
         this.npcs.forEach(npc => {
-            // Handle pause/freeze
-            if (npc.pauseTime > 0) {
-                npc.pauseTime -= delta;
-                npc.setVelocity(0);
-                npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
-                if (npc.debugText) npc.debugText.setPosition(npc.x, npc.y - 20);
-                return;
+            // Update the new NPCController
+            if (npc.controller) {
+                npc.controller.update(0, delta);
             }
 
-            npc.controller.update(0, delta);
-            if (npc.debugText) npc.debugText.setPosition(npc.x, npc.y - 20);
-
-            // If no active path, calculate one to current waypoint
-            if (!npc.activePath || npc.activePath.length === 0) {
-                const target = npc.waypoints[npc.currentWaypointIndex || 0];
-
-                // Convert to tiles
-                const startTx = npc.x / this.mapTileWidth;
-                const startTy = npc.y / this.mapTileHeight;
-                const targetTx = target.x / this.mapTileWidth;
-                const targetTy = target.y / this.mapTileHeight;
-
-                // Calculate A* path
-                const path = this.astar.findPath(startTx, startTy, targetTx, targetTy);
-
-                if (path && path.length > 0) {
-                    npc.activePath = path;
-                    // Remove first node if it's the current tile
-                    if (path.length > 1) npc.activePath.shift();
-                } else {
-                    // Path failed? Skip to next waypoint or wait
-                    npc.pauseTime = 2000;
-                    npc.currentWaypointIndex = (npc.currentWaypointIndex + 1) % npc.waypoints.length;
-                    return;
-                }
+            if (npc.debugText) {
+                npc.debugText.setPosition(npc.x, npc.y - 25);
             }
-
-            // Follow current path node
-            const nextNode = npc.activePath[0];
-            const targetX = (nextNode.x + 0.5) * this.mapTileWidth;
-            const targetY = (nextNode.y + 0.5) * this.mapTileHeight; // Target center of tile
-
-            const dx = targetX - npc.x;
-            const dy = targetY - npc.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            if (dist < 5) {
-                // Reached node
-                npc.activePath.shift();
-                if (npc.activePath.length === 0) {
-                    // Reached final destination (waypoint)
-                    npc.pauseTime = Phaser.Math.Between(1000, 3000);
-                    npc.currentWaypointIndex = (npc.currentWaypointIndex + 1) % npc.waypoints.length;
-                    npc.anims.play(`${npc.npcKey}-idle-${npc.direction}`, true);
-                    npc.setVelocity(0);
-                }
-                return;
-            }
-
-            // Move towards node
-            const angle = Math.atan2(dy, dx);
-            const speed = npc.speed || 40;
-
-            npc.setVelocity(
-                Math.cos(angle) * speed,
-                Math.sin(angle) * speed
-            );
-
-            // Update animation direction
-            if (Math.abs(dx) > Math.abs(dy)) {
-                npc.direction = dx > 0 ? 'right' : 'left';
-            } else {
-                npc.direction = dy > 0 ? 'down' : 'up';
-            }
-            npc.anims.play(`${npc.npcKey}-walk-${npc.direction}`, true);
-
-            // Stuck detection
-            if (Math.abs(npc.x - npc.lastX) < 0.5 && Math.abs(npc.y - npc.lastY) < 0.5) {
-                npc.stuckFrames++;
-                if (npc.stuckFrames > 60) {
-                    // Stuck for 1 second? Recalculate path
-                    npc.activePath = null;
-                    npc.stuckFrames = 0;
-                    // Push slightly to unstuck
-                    npc.x += (Math.random() - 0.5) * 10;
-                    npc.y += (Math.random() - 0.5) * 10;
-                }
-            } else {
-                npc.stuckFrames = 0;
-            }
-            npc.lastX = npc.x;
-            npc.lastY = npc.y;
         });
     }
 
     showNPCDebug() {
         if (!this.npcDebugGroup) {
             this.npcDebugGroup = this.add.group();
-            this.npcs.forEach(npc => {
-                const text = this.add.text(npc.x, npc.y - 20, npc.npcKey, { font: '10px monospace', fill: '#00ff00', backgroundColor: '#000000' });
-                text.setDepth(10000);
-                this.npcDebugGroup.add(text);
-                npc.debugText = text;
-            });
+            this.npcSpawnMarkers = this.add.group();
+            this.npcBodyRects = this.add.group();
         }
+
+        // Clear existing debug elements
+        this.npcDebugGroup.clear(true, true);
+        this.npcSpawnMarkers.clear(true, true);
+        this.npcBodyRects.clear(true, true);
+
+        // Add spawn markers, labels, and physics body rects for all NPCs
+        this.npcs.forEach((npc, idx) => {
+            // Spawn marker (circle at spawn position)
+            const marker = this.add.circle(npc.x, npc.y, 8, 0x00ff00, 0.7);
+            marker.setDepth(10001);
+            marker.setStrokeStyle(2, 0x00ff00);
+            marker.setScrollFactor(1);
+            this.npcSpawnMarkers.add(marker);
+
+            // Label above NPC head (show NPC key and spawn index)
+            const npcKey = npc.npcKey || npc.texture?.key || 'unknown';
+            const spawnIdx = npc.spawnIndex !== undefined ? npc.spawnIndex : idx;
+            const label = `${npcKey} (#${spawnIdx})`;
+            const text = this.add.text(npc.x, npc.y - 25, label, {
+                fontFamily: 'monospace',
+                fontSize: '10px',
+                color: '#00ff00',
+                backgroundColor: '#000000',
+                padding: { x: 4, y: 2 }
+            });
+            text.setOrigin(0.5);
+            text.setDepth(10001);
+            text.setScrollFactor(1);
+            this.npcDebugGroup.add(text);
+            npc.debugText = text;
+
+            // Physics body rect (STEP 2 enhancement)
+            if (npc.body) {
+                const rect = this.add.rectangle(
+                    npc.body.x + npc.body.width / 2,
+                    npc.body.y + npc.body.height / 2,
+                    npc.body.width,
+                    npc.body.height,
+                    0x00ff00,
+                    0.2
+                );
+                rect.setStrokeStyle(1, 0x00ff00);
+                rect.setDepth(10000);
+                rect.setScrollFactor(1);
+                this.npcBodyRects.add(rect);
+                npc.debugBodyRect = rect;
+            }
+        });
+
         this.npcDebugGroup.setVisible(true);
+        this.npcSpawnMarkers.setVisible(true);
+        this.npcBodyRects.setVisible(true);
         this.physics.world.createDebugGraphic();
         this.physics.world.drawDebug = true;
     }
@@ -757,8 +1162,16 @@ export default class GameScene extends Phaser.Scene {
         if (this.npcDebugGroup) {
             this.npcDebugGroup.setVisible(false);
         }
+        if (this.npcSpawnMarkers) {
+            this.npcSpawnMarkers.setVisible(false);
+        }
+        if (this.npcBodyRects) {
+            this.npcBodyRects.setVisible(false);
+        }
         this.physics.world.drawDebug = false;
-        this.physics.world.debugGraphic.clear();
+        if (this.physics.world.debugGraphic) {
+            this.physics.world.debugGraphic.clear();
+        }
     }
 
     debugHealthReport() {
@@ -822,7 +1235,44 @@ export default class GameScene extends Phaser.Scene {
 
         // Update NPCs (with guard)
         if (this.npcs && this.npcs.length > 0) {
-            this.updateNPCs(time, dt);
+            this.updateNPCs(dt);
+            // Update QA NPC count
+            if (window.__QA__) {
+                window.__QA__.updateNPCs(this.npcs.length);
+            }
+        }
+
+        // Update QA player state
+        if (window.__QA__ && this.player && this.player.body) {
+            window.__QA__.updatePlayer(
+                this.player.x,
+                this.player.y,
+                this.player.body.velocity.x,
+                this.player.body.velocity.y
+            );
+        }
+
+        // STEP 5: Update day/night cycle
+        if (this.dayNightCycle) {
+            this.dayNightCycle.update(delta);
+        }
+
+        // STEP 6: Update minimap
+        if (this.minimap) {
+            this.minimap.update();
+        }
+
+        // Update noir grain effect (subtle animation every 100ms)
+        if (this.noirGrain && time % 100 < 50) {
+            this.noirGrain.clear();
+            const { width, height } = this.scale;
+            for (let i = 0; i < 200; i++) {
+                const x = Math.random() * width;
+                const y = Math.random() * height;
+                const alpha = Math.random() * 0.3;
+                this.noirGrain.fillStyle(0xffffff, alpha);
+                this.noirGrain.fillRect(x, y, 1, 1);
+            }
         }
 
         if (this.endingVisible || this.evidenceModal.isOpen || this.interrogationUI.isOpen) {
@@ -830,29 +1280,49 @@ export default class GameScene extends Phaser.Scene {
             return;
         }
 
-        // --- EXTREME BOUNDARY CONTROL (Sanity Check) ---
-        // Every 1 second, verify player is within map bounds
-        if (time > (this.nextSanityCheck || 0)) {
-            const px = this.player.x;
-            const py = this.player.y;
-            const mw = this.physics.world.bounds.width;
-            const mh = this.physics.world.bounds.height;
-
-            if (px < 0 || px > mw || py < 0 || py > mh) {
-                console.warn(`[BOUNDARY VIOLATION] Player at ${truncate(px)},${truncate(py)}. Clamping.`);
-                this.player.setPosition(
-                    Phaser.Math.Clamp(px, 16, mw - 16),
-                    Phaser.Math.Clamp(py, 16, mh - 16)
-                );
-            }
-            this.nextSanityCheck = time + 1000;
+        // Skip movement if Tile Guard rolled back this frame
+        if (this.tileGuardRollback) {
+            // Still process interactions and UI, just skip movement
+            this.tileGuardRollback = false;
         }
 
-        // --- TILE GUARD: Failsafe blocked tile check ---
-        if (this.blockedTiles && this.mapTileWidth) {
+        // --- EXTREME BOUNDARY CONTROL (Every Frame) ---
+        // Always verify player is within map bounds and clamp if needed
+        const px = this.player.x;
+        const py = this.player.y;
+        const mw = this.physics.world.bounds.width;
+        const mh = this.physics.world.bounds.height;
+        const bodyHalfWidth = this.player.body.width / 2;
+        const bodyHalfHeight = this.player.body.height / 2;
+
+        if (px < bodyHalfWidth || px > mw - bodyHalfWidth || py < bodyHalfHeight || py > mh - bodyHalfHeight) {
+            const clampedX = Phaser.Math.Clamp(px, bodyHalfWidth, mw - bodyHalfWidth);
+            const clampedY = Phaser.Math.Clamp(py, bodyHalfHeight, mh - bodyHalfHeight);
+            if (clampedX !== px || clampedY !== py) {
+                console.warn(`[BOUNDARY VIOLATION] Player at ${truncate(px)},${truncate(py)}. Clamping to ${truncate(clampedX)},${truncate(clampedY)}.`);
+                this.player.setPosition(clampedX, clampedY);
+                this.player.setVelocity(0);
+            }
+        }
+
+        // Validate bounds match map size every second
+        if (time > (this.nextBoundsCheck || 0)) {
+            if (this.mapBounds) {
+                const worldBounds = this.physics.world.bounds;
+                if (worldBounds.width !== this.mapBounds.width || worldBounds.height !== this.mapBounds.height) {
+                    console.warn(`Bounds mismatch detected! Resetting.`);
+                    this.physics.world.setBounds(0, 0, this.mapBounds.width, this.mapBounds.height);
+                    this.cameras.main.setBounds(0, 0, this.mapBounds.width, this.mapBounds.height);
+                }
+            }
+            this.nextBoundsCheck = time + 1000;
+        }
+
+        // --- TILE GUARD: Failsafe blocked tile check (Every Frame) ---
+        if (this.blockedTiles && this.mapTileWidth && this.mapTileHeight) {
             const tw = this.mapTileWidth;
             const th = this.mapTileHeight;
-            const mw = this.physics.world.bounds.width / tw;
+            const mapW = this.mapW || Math.floor(this.physics.world.bounds.width / tw);
 
             // Check feet position (bottom center of bounding box)
             const feetX = this.player.body.x + this.player.body.width / 2;
@@ -860,24 +1330,31 @@ export default class GameScene extends Phaser.Scene {
 
             const tx = Math.floor(feetX / tw);
             const ty = Math.floor(feetY / th);
-            const idx = ty * mw + tx;
 
-            if (this.blockedTiles[idx]) {
-                // We are ON a blocked tile! Rollback immediate.
-                // console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty}. Rolling back.`);
-                if (this.lastSafePos) {
-                    this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
-                    this.player.setVelocity(0);
+            // Bounds check for tile coordinates
+            if (tx >= 0 && ty >= 0 && tx < mapW && ty < (this.mapH || Math.floor(this.physics.world.bounds.height / th))) {
+                const idx = ty * mapW + tx;
+
+                if (this.blockedTiles[idx] === 1) {
+                    // We are ON a blocked tile! Rollback immediate.
+                    if (this.lastSafePos) {
+                        console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty}. Rolling back to ${truncate(this.lastSafePos.x)},${truncate(this.lastSafePos.y)}.`);
+                        this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
+                        this.player.setVelocity(0);
+                        // Mark as rolled back to prevent movement processing
+                        this.tileGuardRollback = true;
+                    }
+                } else {
+                    // Safe tile, update last safe pos
+                    if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
+                    this.lastSafePos.set(this.player.x, this.player.y);
+                    this.tileGuardRollback = false;
                 }
-            } else {
-                // Safe tile, update last safe pos
-                if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
-                this.lastSafePos.set(this.player.x, this.player.y);
             }
 
             // Anti-Clip Failsafe: If moving but position unchanged
             const speed = this.player.body.speed;
-            if (speed > 10) {
+            if (speed > 10 && this.lastSafePos) {
                 const moved = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.lastSafePos.x, this.lastSafePos.y);
                 if (moved < 1) { // Not moving despite velocity
                     if (!this.stuckTimer) this.stuckTimer = 0;
@@ -921,45 +1398,56 @@ export default class GameScene extends Phaser.Scene {
             this.promptText.setVisible(false);
         }
 
-        // Movement Normalization
-        this.player.setVelocity(0);
-        const baseSpeed = 160; // Slightly reduced for precision
-        const sprintMultiplier = 1.3;
-        const isSprinting = this.cursors.shift.isDown;
-        const speed = isSprinting ? baseSpeed * sprintMultiplier : baseSpeed;
+        // Movement Normalization (skip if Tile Guard rolled back)
         let moving = false;
-
+        let isSprinting = false;
         let velocityX = 0;
         let velocityY = 0;
 
-        if (this.cursors.left.isDown || this.wasd.A.isDown) {
-            velocityX = -speed;
-            moving = true;
-        } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
-            velocityX = speed;
-            moving = true;
-        }
+        if (!this.tileGuardRollback) {
+            this.player.setVelocity(0);
+            const baseSpeed = 160; // Slightly reduced for precision
+            const sprintMultiplier = 1.3;
+            isSprinting = this.cursors.shift.isDown;
+            const speed = isSprinting ? baseSpeed * sprintMultiplier : baseSpeed;
 
-        if (this.cursors.up.isDown || this.wasd.W.isDown) {
-            velocityY = -speed;
-            moving = true;
-        } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
-            velocityY = speed;
-            moving = true;
-        }
+            if (this.cursors.left.isDown || this.wasd.A.isDown) {
+                velocityX = -speed;
+                moving = true;
+            } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+                velocityX = speed;
+                moving = true;
+            }
 
-        // Sprint trail effect
-        if (moving && isSprinting) {
-            this.createSprintTrail();
-        }
+            if (this.cursors.up.isDown || this.wasd.W.isDown) {
+                velocityY = -speed;
+                moving = true;
+            } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
+                velocityY = speed;
+                moving = true;
+            }
 
-        // Normalize diagonal speed
-        if (velocityX !== 0 && velocityY !== 0) {
-            velocityX *= 0.7071; // 1 / sqrt(2)
-            velocityY *= 0.7071;
-        }
+            // Sprint trail effect
+            if (moving && isSprinting) {
+                this.createSprintTrail();
+            }
 
-        this.player.setVelocity(velocityX, velocityY);
+            // Normalize diagonal speed
+            if (velocityX !== 0 && velocityY !== 0) {
+                velocityX *= 0.7071; // 1 / sqrt(2)
+                velocityY *= 0.7071;
+            }
+
+            this.player.setVelocity(velocityX, velocityY);
+
+            // STEP 4: Play footstep sound when moving
+            if (moving && this.audio) {
+                this.audio.playFootstep();
+            }
+        } else {
+            // Tile Guard rolled back, ensure velocity is zero
+            this.player.setVelocity(0);
+        }
 
         if (moving) {
             // Update animation
@@ -986,6 +1474,11 @@ export default class GameScene extends Phaser.Scene {
 
         // Interaction
         if (this.interactionTarget && Phaser.Input.Keyboard.JustDown(this.keyE)) {
+            // STEP 4: Play interact sound
+            if (this.audio) {
+                this.audio.playInteract();
+            }
+
             if (this.interactionType === 'interactable') {
                 const kind = this.interactionTarget.data.get('kind');
                 const id = this.interactionTarget.data.get('id');
@@ -1074,9 +1567,15 @@ export default class GameScene extends Phaser.Scene {
                 });
             });
             const response = await checkContradictions({ statements });
-            setContradictions(response.contradictions || []);
+            if (response && response.contradictions) {
+                setContradictions(response.contradictions);
+            } else {
+                setContradictions([]);
+            }
         } catch (error) {
+            console.error("Contradiction check error:", error);
             this.showDialog(`Contradiction check failed: ${error.message}`);
+            // Don't throw, just show dialog
         }
     }
 
@@ -1226,6 +1725,24 @@ export default class GameScene extends Phaser.Scene {
         });
         rain.setScrollFactor(0);
         rain.setDepth(100); // Ensure it's on top
+    }
+
+    createNoirOverlay() {
+        const { width, height } = this.scale;
+
+        // Vignette overlay (radial gradient darkening edges)
+        this.noirVignette = this.add.graphics();
+        this.noirVignette.fillGradientStyle(0x000000, 0x000000, 0x000000, 0x000000, 0, 0, 0.3, 0.6);
+        this.noirVignette.fillRect(0, 0, width, height);
+        this.noirVignette.setScrollFactor(0);
+        this.noirVignette.setDepth(98);
+        this.noirVignette.setAlpha(0.4);
+
+        // Film grain effect (subtle)
+        this.noirGrain = this.add.graphics();
+        this.noirGrain.setScrollFactor(0);
+        this.noirGrain.setDepth(99);
+        this.noirGrain.setAlpha(0.03);
     }
 }
 
