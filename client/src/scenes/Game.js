@@ -243,6 +243,21 @@ export default class GameScene extends Phaser.Scene {
             console.log("Game.create: Bounds set to", mapWidth, mapHeight);
             this.mapLoaded = true;
 
+            // --- INITIALIZE MAP DATA FOR TILE GUARD EARLY ---
+            const debugData = this.mapDebugData || {};
+            if (debugData.blocked && debugData.mapW && debugData.mapH) {
+                if (!this.astar) {
+                    this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
+                }
+                // STORE FOR TILE GUARD
+                this.blockedTiles = debugData.blocked;
+                this.mapTileWidth = debugData.tw || this.map?.tileWidth || 32;
+                this.mapTileHeight = debugData.th || this.map?.tileHeight || 32;
+                this.mapW = debugData.mapW;
+                this.mapH = debugData.mapH;
+                console.log(`Game.create: Blocked tiles initialized (${this.mapW}x${this.mapH})`);
+            }
+
         } catch (error) {
             console.error("Game.create FATAL ERROR:", error);
             return; // Stop here on fatal error
@@ -308,19 +323,48 @@ export default class GameScene extends Phaser.Scene {
                     spawnY = center.y;
                     spawnSource = `FALLBACK: First object in Entities layer (${firstObj.name || 'unnamed'})`;
                     console.warn(`⚠️ WARNING: No "Player" or "PlayerSpawn" object found in Entities layer. Using first object: ${firstObj.name || 'unnamed'}`);
+
+                    if (this.blockedTiles && this.mapW && this.mapH) {
+                        const tileX = Math.floor(spawnX / tileW);
+                        const tileY = Math.floor(spawnY / tileH);
+                        if (this.isTileBlocked(tileX, tileY)) {
+                            const nearest = this.findNearestWalkableTile(tileX, tileY);
+                            if (nearest) {
+                                spawnX = nearest.tx * tileW + tileW / 2;
+                                spawnY = nearest.ty * tileH + tileH / 2;
+                                spawnSource += ` (moved to walkable tile ${nearest.tx},${nearest.ty})`;
+                            }
+                        }
+                    }
                 } else {
-                    spawnX = 1000;
-                    spawnY = 1200;
+                    spawnX = 200;
+                    spawnY = 300;
                     spawnSource = 'FALLBACK (Entities layer empty)';
-                    console.error(`❌ VALIDATION FAIL: Entities layer exists but has no objects! Using hardcoded fallback.`);
+                    console.error(`❌ VALIDATION FAIL: Entities layer exists but has no objects! Using fallback.`);
+                    if (this.blockedTiles && this.mapW && this.mapH) {
+                        const nearest = this.findNearestWalkableTile(Math.floor(spawnX / tileW), Math.floor(spawnY / tileH));
+                        if (nearest) {
+                            spawnX = nearest.tx * tileW + tileW / 2;
+                            spawnY = nearest.ty * tileH + tileH / 2;
+                            spawnSource += ` (moved to walkable tile ${nearest.tx},${nearest.ty})`;
+                        }
+                    }
                 }
             }
         } else {
             // No Entities layer - use hardcoded fallback
-            spawnX = 1000;
-            spawnY = 1200;
+            spawnX = 200;
+            spawnY = 300;
             spawnSource = 'FALLBACK (no Entities layer)';
-            console.error(`❌ VALIDATION FAIL: No "Entities" object layer found! Using hardcoded fallback.`);
+            console.error(`❌ VALIDATION FAIL: No "Entities" object layer found! Using fallback.`);
+            if (this.blockedTiles && this.mapW && this.mapH) {
+                const nearest = this.findNearestWalkableTile(Math.floor(spawnX / tileW), Math.floor(spawnY / tileH));
+                if (nearest) {
+                    spawnX = nearest.tx * tileW + tileW / 2;
+                    spawnY = nearest.ty * tileH + tileH / 2;
+                    spawnSource += ` (moved to walkable tile ${nearest.tx},${nearest.ty})`;
+                }
+            }
         }
 
         // --- 3.5. Spawn Points Tracking ---
@@ -797,18 +841,9 @@ export default class GameScene extends Phaser.Scene {
             return;
         }
 
-        // Initialize AStar if not already done
-        const debugData = this.mapDebugData || {};
-        if (debugData.blocked && debugData.mapW && debugData.mapH) {
-            if (!this.astar) {
-                this.astar = new AStarPathfinder(debugData.mapW, debugData.mapH, debugData.blocked);
-            }
-            // STORE FOR TILE GUARD
-            this.blockedTiles = debugData.blocked;
-            this.mapTileWidth = debugData.tw || this.map?.tileWidth || 32;
-            this.mapTileHeight = debugData.th || this.map?.tileHeight || 32;
-            this.mapW = debugData.mapW;
-            this.mapH = debugData.mapH;
+        // AStar should already be initialized in create()
+        if (!this.astar && this.blockedTiles) {
+            this.astar = new AStarPathfinder(this.mapW, this.mapH, this.blockedTiles);
         }
 
         // Always load from Tiled object layer "NPCs"
