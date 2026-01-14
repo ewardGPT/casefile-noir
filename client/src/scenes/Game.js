@@ -207,9 +207,10 @@ export default class GameScene extends Phaser.Scene {
                         normalizedName.includes('water') || normalizedName.includes('dirt') ||
                         normalizedName.includes('stair') || normalizedName.includes('step') ||
                         normalizedName.includes('walk') || normalizedName.includes('road') ||
+                        normalizedName.includes('porch') || normalizedName.includes('entrance') ||
                         name.startsWith('Terrain') || name.startsWith('Trn_') || name.startsWith('Bkg');
 
-                    const forceBlocked = name === 'Trn_3';
+                    const forceBlocked = false; // Disabled force block
 
                     if ((!isSafe || forceBlocked) && name !== 'Trn_1' && name !== 'Trn_2') {
                         // It's a wall, building, roof, prop, deco, etc.
@@ -612,12 +613,12 @@ export default class GameScene extends Phaser.Scene {
             }
         }
 
-        // M key to mute/unmute
+        // K key to mute/unmute (Moved from M)
         this.muteHandler = () => {
             const muted = this.audio.toggleMute();
             console.log(`Audio ${muted ? 'muted' : 'unmuted'}`);
         };
-        this.input.keyboard.on('keydown-M', this.muteHandler);
+        this.input.keyboard.on('keydown-K', this.muteHandler);
 
         // --- 8.6. Day/Night Cycle System (STEP 5) ---
         this.dayNightCycle = new DayNightCycle(this);
@@ -627,10 +628,19 @@ export default class GameScene extends Phaser.Scene {
         this.minimap = new Minimap(this);
         this.minimap.init();
 
-        // F7 toggle minimap
+        // M key toggle full map
+        this.mHandler = () => {
+            if (this.minimap) {
+                const isFull = this.minimap.toggleFullMap();
+                console.log(`Full Map ${isFull ? 'enabled' : 'disabled'}`);
+            }
+        };
+        this.input.keyboard.on('keydown-M', this.mHandler);
+
+        // F7 toggle minimap visibility
         this.f7Handler = () => {
             const enabled = this.minimap.toggle();
-            console.log(`Minimap ${enabled ? 'enabled' : 'disabled'}`);
+            console.log(`Minimap ${enabled ? 'visible' : 'hidden'}`);
         };
         this.input.keyboard.on('keydown-F7', this.f7Handler);
 
@@ -849,8 +859,9 @@ export default class GameScene extends Phaser.Scene {
         // Always load from Tiled object layer "NPCs"
         const npcLayer = this.map.getObjectLayer('NPCs');
         if (!npcLayer) {
-            console.warn("Game.spawnNPCs: 'NPCs' object layer not found. NPCs will not spawn.");
-            return; // Fail gracefully
+            console.warn("Game.spawnNPCs: 'NPCs' layer not found. Using fallback spawning.");
+            await this.spawnNPCsFallback();
+            return;
         }
 
         if (!npcLayer.objects || npcLayer.objects.length === 0) {

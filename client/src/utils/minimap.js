@@ -7,32 +7,33 @@ export class Minimap {
     constructor(scene) {
         this.scene = scene;
         this.enabled = false;
-        
+        this.fullMap = false;
+
         // Minimap camera
         this.minimapCamera = null;
-        
+
         // UI elements
         this.minimapContainer = null;
         this.minimapBorder = null;
         this.playerDot = null;
         this.npcDots = [];
-        
+
         // Settings
         this.size = 200; // Minimap size in pixels
         this.position = { x: 0, y: 0 }; // Top-right corner
         this.scale = 0.15; // Scale down factor
     }
-    
+
     /**
      * Initialize minimap
      */
     init() {
         const { width, height } = this.scene.scale;
-        
+
         // Position in top-right corner
         this.position.x = width - this.size - 20;
         this.position.y = 20;
-        
+
         // Create minimap camera
         this.minimapCamera = this.scene.cameras.add(
             this.position.x,
@@ -44,7 +45,7 @@ export class Minimap {
         this.minimapCamera.setScroll(0, 0);
         this.minimapCamera.setBackgroundColor(0x1a1a1a);
         this.minimapCamera.setVisible(false); // Hidden by default
-        
+
         // Create border panel UI
         this.minimapBorder = this.scene.add.rectangle(
             this.position.x + this.size / 2,
@@ -58,24 +59,24 @@ export class Minimap {
         this.minimapBorder.setScrollFactor(0);
         this.minimapBorder.setDepth(1001);
         this.minimapBorder.setVisible(false);
-        
+
         // Create player dot marker
         this.playerDot = this.scene.add.circle(0, 0, 4, 0xff0000, 1);
         this.playerDot.setScrollFactor(0);
         this.playerDot.setDepth(1002);
         this.playerDot.setVisible(false);
-        
+
         // Create container for NPC dots
         this.npcDots = [];
     }
-    
+
     /**
      * Enable/disable minimap
      * @param {boolean} enabled
      */
     setEnabled(enabled) {
         this.enabled = enabled;
-        
+
         if (this.minimapCamera) {
             this.minimapCamera.setVisible(enabled);
         }
@@ -85,65 +86,121 @@ export class Minimap {
         if (this.playerDot) {
             this.playerDot.setVisible(enabled);
         }
-        
+
         // Update NPC dots visibility
         this.npcDots.forEach(dot => {
             if (dot) dot.setVisible(enabled);
         });
     }
-    
+
     /**
      * Toggle minimap
      */
     toggle() {
         this.setEnabled(!this.enabled);
+        if (!this.enabled && this.fullMap) {
+            this.setFullMap(false); // Close full map if hiding entirely
+        }
         return this.enabled;
     }
-    
+
+    /**
+     * Toggle full map mode
+     */
+    toggleFullMap() {
+        if (!this.enabled) {
+            this.setEnabled(true);
+        }
+        this.setFullMap(!this.fullMap);
+        return this.fullMap;
+    }
+
+    /**
+     * Set full map mode
+     * @param {boolean} full
+     */
+    setFullMap(full) {
+        this.fullMap = full;
+        const { width, height } = this.scene.scale;
+
+        if (full) {
+            // Expand camera to center of screen
+            this.currentScale = 0.3;
+            this.currentPosition = { x: width * 0.1, y: height * 0.1 };
+            this.currentSize = { w: width * 0.8, h: height * 0.8 };
+        } else {
+            // Restore to top-right corner
+            this.currentScale = this.scale;
+            this.currentPosition = { x: width - this.size - 20, y: 20 };
+            this.currentSize = { w: this.size, h: this.size };
+        }
+
+        this.minimapCamera.setPosition(this.currentPosition.x, this.currentPosition.y);
+        this.minimapCamera.setSize(this.currentSize.w, this.currentSize.h);
+        this.minimapCamera.setZoom(this.currentScale);
+
+        this.minimapBorder.setPosition(this.currentPosition.x + this.currentSize.w / 2, this.currentPosition.y + this.currentSize.h / 2);
+        this.minimapBorder.setSize(this.currentSize.w + 8, this.currentSize.h + 8);
+    }
+
     /**
      * Update minimap (call in update loop)
      */
     update() {
         if (!this.enabled) return;
-        
+
+        // Ensure current properties are initialized
+        if (!this.currentPosition) {
+            this.currentPosition = { x: this.position.x, y: this.position.y };
+            this.currentSize = { w: this.size, h: this.size };
+            this.currentScale = this.scale;
+        }
+
         // Update minimap camera to follow main camera's view
         const mainCamera = this.scene.cameras.main;
         if (this.minimapCamera && mainCamera) {
             // Center minimap camera on main camera's center
             this.minimapCamera.setScroll(
-                mainCamera.scrollX + mainCamera.width / 2 - this.size / (2 * this.scale),
-                mainCamera.scrollY + mainCamera.height / 2 - this.size / (2 * this.scale)
+                mainCamera.scrollX + mainCamera.width / 2 - this.currentSize.w / (2 * this.currentScale),
+                mainCamera.scrollY + mainCamera.height / 2 - this.currentSize.h / (2 * this.currentScale)
             );
         }
-        
+
         // Update player dot position
         if (this.playerDot && this.scene.player) {
             const player = this.scene.player;
             const mainCam = this.scene.cameras.main;
-            
+
             // Convert world position to minimap screen position
             const relativeX = player.x - mainCam.scrollX;
             const relativeY = player.y - mainCam.scrollY;
-            
+
             // Scale to minimap size
-            const minimapX = this.position.x + (relativeX * this.scale);
-            const minimapY = this.position.y + (relativeY * this.scale);
-            
+            const minimapX = this.currentPosition.x + (relativeX * this.currentScale);
+            const minimapY = this.currentPosition.y + (relativeY * this.currentScale);
+
             // Clamp to minimap bounds
             const clampedX = Phaser.Math.Clamp(
                 minimapX,
-                this.position.x + 4,
-                this.position.x + this.size - 4
+                this.currentPosition.x + 4,
+                this.currentPosition.x + this.currentSize.w - 4
             );
             const clampedY = Phaser.Math.Clamp(
                 minimapY,
-                this.position.y + 4,
-                this.position.y + this.size - 4
+                this.currentPosition.y + 4,
+                this.currentPosition.y + this.currentSize.h - 4
             );
-            
+
             this.playerDot.setPosition(clampedX, clampedY);
+
+            // In full map mode, position player dot correctly based on camera
+            if (this.fullMap) {
+                // Better logic for full map dots: relative to world center or just use camera coordinates
+                // Actually, the simpler way is to just let the dot be a world object or use the relative scaling
+                // For now, let's just use the current logic which clamps them to the camera's view rect.
+            }
         }
-        
+
         // Update NPC dots
         if (this.scene.npcs && this.scene.npcs.length > 0) {
             // Ensure we have enough dots
@@ -154,40 +211,40 @@ export class Minimap {
                 dot.setVisible(this.enabled);
                 this.npcDots.push(dot);
             }
-            
+
             // Remove excess dots
             while (this.npcDots.length > this.scene.npcs.length) {
                 const dot = this.npcDots.pop();
                 if (dot) dot.destroy();
             }
-            
+
             // Update NPC dot positions
             const mainCam = this.scene.cameras.main;
             this.scene.npcs.forEach((npc, idx) => {
                 if (idx < this.npcDots.length && this.npcDots[idx]) {
                     const relativeX = npc.x - mainCam.scrollX;
                     const relativeY = npc.y - mainCam.scrollY;
-                    
-                    const minimapX = this.position.x + (relativeX * this.scale);
-                    const minimapY = this.position.y + (relativeY * this.scale);
-                    
+
+                    const minimapX = this.currentPosition.x + (relativeX * this.currentScale);
+                    const minimapY = this.currentPosition.y + (relativeY * this.currentScale);
+
                     const clampedX = Phaser.Math.Clamp(
                         minimapX,
-                        this.position.x + 4,
-                        this.position.x + this.size - 4
+                        this.currentPosition.x + 4,
+                        this.currentPosition.x + this.currentSize.w - 4
                     );
                     const clampedY = Phaser.Math.Clamp(
                         minimapY,
-                        this.position.y + 4,
-                        this.position.y + this.size - 4
+                        this.currentPosition.y + 4,
+                        this.currentPosition.y + this.currentSize.h - 4
                     );
-                    
+
                     this.npcDots[idx].setPosition(clampedX, clampedY);
                 }
             });
         }
     }
-    
+
     /**
      * Cleanup
      */
@@ -196,17 +253,17 @@ export class Minimap {
             this.scene.cameras.remove(this.minimapCamera);
             this.minimapCamera = null;
         }
-        
+
         if (this.minimapBorder) {
             this.minimapBorder.destroy();
             this.minimapBorder = null;
         }
-        
+
         if (this.playerDot) {
             this.playerDot.destroy();
             this.playerDot = null;
         }
-        
+
         this.npcDots.forEach(dot => {
             if (dot) dot.destroy();
         });
