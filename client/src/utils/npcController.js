@@ -160,13 +160,50 @@ export class NPCController {
             return;
         }
 
-        // Pick random point in radius
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * this.wanderRadius;
-        const targetX = this.homeX + Math.cos(angle) * dist;
-        const targetY = this.homeY + Math.sin(angle) * dist;
-
-        this.calculatePath(targetX, targetY);
+        // Pick random REACHABLE destination within radius
+        // Try up to 10 random points to find a reachable one
+        let targetX, targetY;
+        let foundReachable = false;
+        
+        for (let attempt = 0; attempt < 10; attempt++) {
+            // Pick random point in radius
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * this.wanderRadius;
+            targetX = this.homeX + Math.cos(angle) * dist;
+            targetY = this.homeY + Math.sin(angle) * dist;
+            
+            // Check if destination is reachable (has valid path)
+            if (this.astar) {
+                const startTx = Math.floor(this.sprite.x / this.tileSize);
+                const startTy = Math.floor(this.sprite.y / this.tileSize);
+                const targetTx = Math.floor(targetX / this.tileSize);
+                const targetTy = Math.floor(targetY / this.tileSize);
+                
+                // Quick validation: check if target tile is blocked
+                if (targetTx >= 0 && targetTy >= 0 && targetTx < this.astar.mapW && targetTy < this.astar.mapH) {
+                    const targetIdx = targetTy * this.astar.mapW + targetTx;
+                    if (this.astar.blocked && targetIdx >= 0 && targetIdx < this.astar.blocked.length && this.astar.blocked[targetIdx] === 0) {
+                        // Try to find path (quick check - limit iterations)
+                        const path = this.astar.findPath(startTx, startTy, targetTx, targetTy, 1000);
+                        if (path && path.length > 0) {
+                            foundReachable = true;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // No A* - just use the random point
+                foundReachable = true;
+                break;
+            }
+        }
+        
+        if (foundReachable) {
+            this.calculatePath(targetX, targetY);
+        } else {
+            // Fallback: stay paused if no reachable destination found
+            this.enterPause(Phaser.Math.Between(1000, 2000));
+        }
     }
 
     calculatePath(targetX, targetY) {
@@ -248,8 +285,18 @@ export class NPCController {
         const animType = isMoving ? 'walk' : 'idle';
         const animKey = `${key}-${animType}-${dir}`;
 
-        if (this.sprite.anims && this.sprite.anims.exists(animKey)) {
-            this.sprite.anims.play(animKey, true);
+        // ✅ Check existence on Scene Animation Manager, not sprite state
+        if (this.scene.anims.exists(animKey)) {
+            if (this.sprite.anims.currentAnim?.key !== animKey) {
+                this.sprite.anims.play(animKey, true);
+            }
+        } else {
+            // One-time warning (optional)
+            this._missingAnimWarn ??= new Set();
+            if (!this._missingAnimWarn.has(animKey)) {
+                this._missingAnimWarn.add(animKey);
+                console.warn(`[NPC ANIMS] Missing animation key: "${animKey}"`);
+            }
         }
     }
 }

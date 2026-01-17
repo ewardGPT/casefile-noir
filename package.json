@@ -1,7 +1,12 @@
 {
-    "name": "hackathon-winner",
-    "private": true,
-    "scripts": {
-        "check": "node projectHealthCheck.js"
-    }
+  "name": "hackathon-winner",
+  "private": true,
+  "scripts": {
+    "check": "node projectHealthCheck.js",
+    "dev": "cd client && npm run dev"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^25.0.8"
+  }
 }

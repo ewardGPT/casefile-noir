@@ -3,7 +3,34 @@
 // FAST: typed arrays + BFS. No Gemini/LLM needed.
 
 function layerByName(mapJson, name) {
-    return (mapJson.layers || []).find((l) => l.name === name);
+    // Support aliases: try exact match first, then case-insensitive, then common aliases
+    const layers = mapJson.layers || [];
+    const exact = layers.find((l) => l.name === name);
+    if (exact) return exact;
+    
+    // Case-insensitive match
+    const caseInsensitive = layers.find((l) => l.name && l.name.toLowerCase() === name.toLowerCase());
+    if (caseInsensitive) return caseInsensitive;
+    
+    // Common aliases for Entities layer
+    if (name === 'Entities') {
+        const aliases = ['entities', 'Spawns', 'SpawnPoints', 'Spawn', 'PlayerSpawn'];
+        for (const alias of aliases) {
+            const found = layers.find((l) => l.name === alias || (l.name && l.name.toLowerCase() === alias.toLowerCase()));
+            if (found) return found;
+        }
+    }
+    
+    // Common aliases for Collisions layer
+    if (name === 'Collisions') {
+        const aliases = ['collisions', 'Collision', 'Walls', 'Obstacles'];
+        for (const alias of aliases) {
+            const found = layers.find((l) => l.name === alias || (l.name && l.name.toLowerCase() === alias.toLowerCase()));
+            if (found) return found;
+        }
+    }
+    
+    return null;
 }
 
 function getProp(obj, propName) {
@@ -181,7 +208,11 @@ export async function validateTiledMap({
         report.warnings.push(`No "${required.collisionsLayer}" object layer found. Using tile collisions from Bldg layers.`);
     }
     if (!hasEntities) {
-        report.warnings.push(`No "${required.entitiesLayer}" object layer found. Using default spawn.`);
+        // Check for any object layers that might be Entities
+        const allObjectLayers = (mapJson.layers || []).filter(l => l.type === "objectgroup");
+        const layerNames = allObjectLayers.map(l => l.name || '(unnamed)').join(', ');
+        report.warnings.push(`No "${required.entitiesLayer}" object layer found. Available object layers: ${layerNames || 'none'}. Player spawn will use validated default position.`);
+        // Don't fail validation - we have fallback spawn logic
     }
 
     // Optional layers

@@ -29,6 +29,10 @@ export default class Boot extends Phaser.Scene {
             if (window.__QA__) {
                 window.__QA__.logAsset404(file.key || 'unknown', file.src || 'unknown');
             }
+            // Show error overlay for map loading failures
+            if (file.key === 'city_map') {
+                this.showMapErrorOverlay(`Failed to load map: ${file.src}`);
+            }
         });
         this.load.on('filecompleteerror', (key, type, file) => {
             this.loadHandlers.filecompleteerror(key, type, file);
@@ -41,10 +45,11 @@ export default class Boot extends Phaser.Scene {
         // -- CORE ASSETS --
         // -- CORE ASSETS --
         // Load the split JSON map (optimized for webgl)
-        this.load.tilemapTiledJSON('city_map', 'assets/maps/victorian/city_map_split.json');
+        // Path: public/assets/maps/victorian/city_map_split.json (server serves from client/ root)
+        this.load.tilemapTiledJSON('city_map', 'public/assets/maps/victorian/city_map_split.json');
 
         // Tileset Images (Key must match 'name' in TMX/JSON for auto-matching, or we map manually)
-        const path = 'assets/maps/victorian/';
+        const path = 'public/assets/maps/victorian/';
 
         // Load split terrain chunks (0 to 7)
         for (let i = 0; i < 8; i++) {
@@ -139,6 +144,10 @@ export default class Boot extends Phaser.Scene {
             });
         }
 
+        // Sanity check: log all animation keys
+        const animKeys = Object.keys(this.anims.anims.entries || {});
+        console.log('✅ Anim keys created:', animKeys);
+        
         console.log("Boot scene complete. Starting Menu...");
         try {
             this.scene.start('StartMenu');
@@ -146,6 +155,45 @@ export default class Boot extends Phaser.Scene {
             console.error("Failed to start StartMenu scene:", error);
             throw error; // Re-throw to trigger error overlay
         }
+    }
+
+    showMapErrorOverlay(message) {
+        // Create error overlay
+        const { width, height } = this.scale;
+        const bg = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.9);
+        bg.setScrollFactor(0);
+        bg.setDepth(10000);
+        
+        const errorText = this.add.text(width / 2, height / 2 - 50, 'MAP LOADING ERROR', {
+            fontSize: '32px',
+            fontFamily: 'monospace',
+            color: '#ff0000',
+            align: 'center'
+        });
+        errorText.setOrigin(0.5);
+        errorText.setScrollFactor(0);
+        errorText.setDepth(10001);
+        
+        const msgText = this.add.text(width / 2, height / 2 + 20, message, {
+            fontSize: '18px',
+            fontFamily: 'monospace',
+            color: '#ffffff',
+            align: 'center',
+            wordWrap: { width: width - 100 }
+        });
+        msgText.setOrigin(0.5);
+        msgText.setScrollFactor(0);
+        msgText.setDepth(10001);
+        
+        const hintText = this.add.text(width / 2, height / 2 + 100, 'Check console for details', {
+            fontSize: '14px',
+            fontFamily: 'monospace',
+            color: '#aaaaaa',
+            align: 'center'
+        });
+        hintText.setOrigin(0.5);
+        hintText.setScrollFactor(0);
+        hintText.setDepth(10001);
     }
 
     shutdown() {

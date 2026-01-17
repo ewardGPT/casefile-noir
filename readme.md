@@ -91,6 +91,8 @@ npm run dev
 4. **Open the game**
 Navigate to `http://localhost:5173` in your browser
 
+**⚠️ IMPORTANT:** Always use `npm run dev` to start the Vite dev server. Do NOT use Python's `http.server` or any other static file server - Vite is required to bundle Phaser and process ES modules.
+
 ---
 
 ## 🎮 Controls

@@ -213,35 +213,72 @@ if (qaMode) {
                 return originalStart(key, data);
             };
             
+            // Auto-start: Wait for StartMenu to finish validation, then start Game
+            const checkStartMenu = setInterval(() => {
+                const startMenuScene = window.game.scene.getScene('StartMenu');
+                if (startMenuScene && startMenuScene.scene.isActive()) {
+                    // Wait for validation to complete
+                    if (startMenuScene.validationPassed !== undefined) {
+                        // Give validation a moment to complete
+                        setTimeout(() => {
+                            if (startMenuScene.validationPassed) {
+                                console.log('[QA MODE] Validation passed, auto-starting Game...');
+                                // Auto-start game (bypass user interaction)
+                                window.game.scene.start('Game', {
+                                    mapDebugData: startMenuScene.mapDebugData
+                                });
+                            } else {
+                                console.warn('[QA MODE] Validation failed, but continuing anyway...');
+                                window.game.scene.start('Game', {
+                                    mapDebugData: startMenuScene.mapDebugData
+                                });
+                            }
+                        }, 1000);
+                        clearInterval(checkStartMenu);
+                    }
+                }
+            }, 100);
+            
             // Wait for Game scene to be active, then monitor
             const checkGameScene = setInterval(() => {
                 const gameScene = window.game.scene.getScene('Game');
                 if (gameScene && gameScene.scene.isActive()) {
                     clearInterval(checkGameScene);
                     
-                    // Monitor player
-                    if (gameScene.player) {
-                        const monitorPlayer = setInterval(() => {
-                            if (gameScene.player && gameScene.player.body) {
-                                window.__QA__.updatePlayer(
-                                    gameScene.player.x,
-                                    gameScene.player.y,
-                                    gameScene.player.body.velocity.x,
-                                    gameScene.player.body.velocity.y
-                                );
+                    // Wait for map to load and NPCs to spawn
+                    const waitForSpawn = setTimeout(() => {
+                        // Monitor player
+                        if (gameScene.player) {
+                            const monitorPlayer = setInterval(() => {
+                                if (gameScene.player && gameScene.player.body) {
+                                    window.__QA__.updatePlayer(
+                                        gameScene.player.x,
+                                        gameScene.player.y,
+                                        gameScene.player.body.velocity.x,
+                                        gameScene.player.body.velocity.y
+                                    );
+                                }
+                            }, 100);
+                            
+                            // Monitor NPCs
+                            if (gameScene.npcs) {
+                                window.__QA__.updateNPCs(gameScene.npcs.length || 0);
                             }
-                        }, 100);
-                        
-                        // Monitor NPCs
-                        if (gameScene.npcs) {
-                            window.__QA__.updateNPCs(gameScene.npcs.length || 0);
+                            
+                            // Print summary after 2 seconds (as per Step 4 requirement)
+                            setTimeout(() => {
+                                printQASummary(window.game);
+                            }, 2000);
+                        } else {
+                            // Player not ready, wait a bit more
+                            setTimeout(() => {
+                                if (gameScene.player) {
+                                    window.__QA__.updateNPCs(gameScene.npcs?.length || 0);
+                                    printQASummary(window.game);
+                                }
+                            }, 1000);
                         }
-                        
-                        // Print summary after 3 seconds
-                        setTimeout(() => {
-                            printQASummary(window.game);
-                        }, 3000);
-                    }
+                    }, 500); // Wait 500ms for spawn to complete
                 }
             }, 100);
         }

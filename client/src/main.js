@@ -63,6 +63,9 @@ function escapeHtml(text) {
 
 window.onerror = function (message, source, lineno, colno, error) {
     const stack = error?.stack || `No stack trace available`;
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:64',message:'window.onerror caught',data:{message:String(message),source:String(source),lineno,colno,hasMinimapError:String(message).includes('Minimap')},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     showQAError(
         `Message: ${message}\nSource: ${source}\nLine: ${lineno}:${colno}`,
         'window.onerror',
