@@ -17,8 +17,23 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.setOrigin(0.5);
     this.setDepth(100);
 
-    const scale = 1.5;
-    this.setScale(scale);
+    // MANDATORY FIX: NPC Scale Lock - Hard-code scale to 2.0 to match detective
+    // Detective: frameH=64, normalized via normalizeCharacterSprite to tileH * 1.75
+    // For tileH=32: TARGET_H = 32 * 1.75 = 56px, scale = 56/64 = 0.875, displayH = 64 * 0.875 = 56px
+    // BUT: normalizeCharacterSprite may apply different scale, so we need to match the RESULT
+    // NPC Scale Lock: Hard-code 2.0 scale (64px frame * 2.0 = 128px display height)
+    // This will be overridden by normalizeCharacterSprite, but we'll force-match after
+    const MANDATORY_NPC_SCALE = 2.0;
+    this.setScale(MANDATORY_NPC_SCALE);
+    
+    // Store flag to prevent normalizeCharacterSprite from overriding
+    this._scaleLocked = true;
+    this._targetScale = MANDATORY_NPC_SCALE;
+    
+    // VERIFICATION: Calculate displayHeight
+    const npcFrameH = 64; // NPC frames are 64x64 (matching detective)
+    const npcDisplayH = npcFrameH * MANDATORY_NPC_SCALE; // 128px
+    console.log(`[NPC Scale Lock] ${data.name || data.id}: scale=${MANDATORY_NPC_SCALE}, frameH=${npcFrameH}, displayH=${npcDisplayH}px`);
 
     this.setupPhysics();
     this.createBillboardNameplate();
