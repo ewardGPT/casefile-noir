@@ -6,7 +6,12 @@ const defaultState = {
     contradictions: [],
     timeline: [],
     score: 100,
-    bestScore: 0
+    bestScore: 0,
+    quests: {
+        active: null, // { id, title, objective, target: {x, y, map} }
+        completed: [], // [id]
+        history: [] // [{id, status, timestamp}]
+    }
 };
 
 let stateCache = null;
@@ -27,6 +32,12 @@ export const loadGameState = () => {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     const parsed = raw ? JSON.parse(raw) : null;
     stateCache = parsed ? { ...defaultState, ...parsed } : clone(defaultState);
+
+    // Migration: ensure quests exists if loading old state
+    if (!stateCache.quests) {
+        stateCache.quests = clone(defaultState.quests);
+    }
+
     ensureWindowState(stateCache);
     return stateCache;
 };
@@ -105,6 +116,33 @@ export const setBestScore = (score) => {
     updateGameState((state) => {
         if (score > state.bestScore) {
             state.bestScore = score;
+        }
+    });
+};
+
+// --- Quest Actions ---
+
+export const setActiveQuest = (questData) => {
+    updateGameState((state) => {
+        state.quests.active = questData;
+        state.quests.history.push({
+            id: questData.id,
+            status: 'started',
+            timestamp: new Date().toISOString()
+        });
+    });
+};
+
+export const completeActiveQuest = () => {
+    updateGameState((state) => {
+        if (state.quests.active) {
+            state.quests.completed.push(state.quests.active.id);
+            state.quests.history.push({
+                id: state.quests.active.id,
+                status: 'completed',
+                timestamp: new Date().toISOString()
+            });
+            state.quests.active = null;
         }
     });
 };

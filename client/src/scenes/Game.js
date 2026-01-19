@@ -21,6 +21,8 @@ import { GuideSystem } from '../utils/GuideSystem.js';
 import { StoryData } from '../story/storyData.js';
 // Minimap - use dynamic import to handle old builds gracefully
 // import { Minimap } from '../utils/minimap.js'; // Commented out - using dynamic import instead
+import { QuestSystem } from '../utils/QuestSystem.js';
+import { QuestUI } from '../ui/QuestUI.js';
 import Phaser from 'phaser';
 
 export default class GameScene extends Phaser.Scene {
@@ -300,6 +302,11 @@ export default class GameScene extends Phaser.Scene {
             this.mapBounds = { width: mapWidth, height: mapHeight };
             console.log("Game.create: Bounds set to", mapWidth, mapHeight);
             this.mapLoaded = true;
+
+            // Initialize navigation logic
+            if (this.questSystem && this.questSystem.activeQuest) {
+                this.updateQuestNavigation(this.questSystem.activeQuest);
+            }
 
             // --- INITIALIZE MAP DATA FOR TILE GUARD EARLY ---
             const debugData = this.mapDebugData || {};
@@ -1191,7 +1198,33 @@ export default class GameScene extends Phaser.Scene {
             this.debugHealthReport();
         }
 
-        // --- 12. Debug Overlay (F2 toggle) ---
+        // --- 12. Quest System & Navigation ---
+        this.questSystem = new QuestSystem(this);
+        this.questUI = new QuestUI(this);
+
+        this.questSystem.events.on('quest-update', (quest) => {
+            this.questUI.updateQuest(quest);
+            this.updateQuestNavigation(quest);
+        });
+
+
+
+        // Visuals: White Circle at feet
+        this.navCircle = this.add.graphics();
+        this.navCircle.lineStyle(2, 0xffffff, 0.8);
+        this.navCircle.strokeCircle(0, 0, 16);
+        this.navCircle.setDepth(5); // Just above ground
+        this.navCircle.setVisible(false);
+
+        // Visuals: Directional Arrow
+        this.navArrow = this.add.triangle(0, 0, 0, -10, 10, 10, -10, 10, 0xffd700);
+        this.navArrow.setDepth(5);
+        this.navArrow.setVisible(false);
+
+        // Init Quest System AFTER visuals are ready
+        this.questSystem.init();
+
+        // --- 13. Debug Overlay (F2 toggle) ---
         const debugData = this.registry.get("mapDebugData");
         this.debugCollisionActive = false;
         this.f2Handler = () => {
@@ -2157,6 +2190,58 @@ export default class GameScene extends Phaser.Scene {
         return null;
     }
 
+    updateQuestNavigation(quest) {
+        this.currentQuestTarget = quest ? quest.target : null;
+        if (!this.currentQuestTarget) {
+            this.navCircle.setVisible(false);
+            this.navArrow.setVisible(false);
+        } else {
+            this.navCircle.setVisible(true);
+            this.navArrow.setVisible(true);
+        }
+    }
+
+    updateQuestNavigationVisuals() {
+        if (!this.player || !this.currentQuestTarget) return;
+
+        // Circle follows feet
+        this.navCircle.x = this.player.x;
+        this.navCircle.y = this.player.y;
+
+        // Arrow rotates towards target
+        const angle = Phaser.Math.Angle.Between(
+            this.player.x,
+            this.player.y,
+            this.currentQuestTarget.x,
+            this.currentQuestTarget.y
+        );
+
+        // Position arrow slightly away from player
+        const radius = 60; // Slightly further out to clear the feet circle
+        this.navArrow.x = this.player.x + Math.cos(angle) * radius;
+        this.navArrow.y = this.player.y + Math.sin(angle) * radius;
+        this.navArrow.setRotation(angle + Math.PI / 2); // Adjust for triangle orientation
+
+        // Update Minimap Quest Target
+        if (this.minimap) {
+            this.minimap.setQuestTarget(this.currentQuestTarget);
+        }
+    }
+
+    checkQuestTriggers() {
+        if (!this.questSystem || !this.questSystem.getActiveQuest()) return;
+
+        const active = this.questSystem.getActiveQuest();
+
+        // Polling for location-based quests
+        if (active.id === 'intro_01' && active.target) {
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, active.target.x, active.target.y);
+            if (dist < 150) { // 150px radius
+                this.questSystem.checkQuestCompletion({ type: 'location_reached', id: 'intro_01' });
+            }
+        }
+    }
+
     isTileBlocked(tx, ty) {
         if (!this.blockedTiles || !this.mapW) return false;
         if (tx < 0 || ty < 0 || tx >= this.mapW || ty >= this.mapH) return true;
@@ -2790,6 +2875,10 @@ export default class GameScene extends Phaser.Scene {
                 this.handleTransition(this.interactionTarget);
             }
         }
+
+        // STEP 7: Update Quest Navigation Visuals (Arrow rotation/position)
+        this.updateQuestNavigationVisuals();
+        this.checkQuestTriggers();
     }
 
     /**
@@ -2848,6 +2937,10 @@ export default class GameScene extends Phaser.Scene {
             upsertEvidence(entry);
             addTimelineEvent({ text: `Evidence collected: ${data.title || data.id}` });
             this.evidenceModal.open(entry);
+            // Trigger quest completion checks
+            if (this.questSystem) {
+                this.questSystem.checkQuestCompletion({ type: 'evidence_scanned', id: data.id });
+            }
             return;
         }
         if (kind === 'suspect') {
@@ -2858,6 +2951,10 @@ export default class GameScene extends Phaser.Scene {
                 name: data.title,
                 portrait: data.portrait
             });
+            // Trigger quest completion checks
+            if (this.questSystem) {
+                this.questSystem.checkQuestCompletion({ type: 'interrogation_started', id: data.id });
+            }
             return;
         }
         this.showDialog('Nothing interesting here.');

@@ -304,7 +304,38 @@ export default class InterrogationUI {
 
             await this.refreshContradictions();
         } catch (error) {
-            this.appendLog(`System: ${error.message}`, 'ai');
+            console.warn("API Error, utilizing fallback:", error);
+
+            // --- FALLBACK LOGIC ---
+            // 1. Get Suspect Data
+            const dialogueTree = this.storyData.dialogueTree || {};
+            const suspectData = dialogueTree[this.currentSuspect.name] || {};
+
+            // 2. Determine Topic (Simple keyword matching)
+            let reply = suspectData.default || "I have nothing to say about that.";
+
+            const lowerQ = question.toLowerCase();
+            if (suspectData.topics) {
+                for (const [topic, text] of Object.entries(suspectData.topics)) {
+                    if (lowerQ.includes(topic.toLowerCase())) {
+                        reply = text;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Simulate Network Delay for realism
+            this.appendLog("...", 'ai');
+            setTimeout(() => {
+                // Remove the "..." entry (optional, but cleaner if we could identify it)
+                // For now, just add the real reply
+
+                addSuspectStatement(this.currentSuspect.id, this.currentSuspect.name, reply, 'Suspect');
+                this.appendLog(`${this.currentSuspect.name}: ${reply}`, 'ai');
+                voiceService.speak(reply, this.currentSuspect.name);
+
+                // Note: Contradictions won't update in offline mode, which is fine.
+            }, 800);
         }
     }
 

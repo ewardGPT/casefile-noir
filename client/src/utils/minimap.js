@@ -16,12 +16,15 @@ export class Minimap {
         this.minimapContainer = null;
         this.minimapBorder = null;
         this.playerDot = null;
+        this.questDot = null;
         this.npcDots = [];
 
         // Settings
         this.size = 200; // Minimap size in pixels
         this.position = { x: 0, y: 0 }; // Top-right corner
         this.scale = 0.15; // Scale down factor
+
+        this.questTarget = null;
     }
 
     /**
@@ -66,8 +69,22 @@ export class Minimap {
         this.playerDot.setDepth(1002);
         this.playerDot.setVisible(false);
 
+        // Create quest target marker (Yellow/Gold)
+        this.questDot = this.scene.add.circle(0, 0, 6, 0xffd700, 1);
+        this.questDot.setStrokeStyle(2, 0x000000);
+        this.questDot.setScrollFactor(0);
+        this.questDot.setDepth(1003);
+        this.questDot.setVisible(false);
+
         // Create container for NPC dots
         this.npcDots = [];
+    }
+
+    setQuestTarget(target) {
+        this.questTarget = target;
+        if (!target) {
+            if (this.questDot) this.questDot.setVisible(false);
+        }
     }
 
     /**
@@ -193,11 +210,44 @@ export class Minimap {
 
             this.playerDot.setPosition(clampedX, clampedY);
 
-            // In full map mode, position player dot correctly based on camera
-            if (this.fullMap) {
-                // Better logic for full map dots: relative to world center or just use camera coordinates
-                // Actually, the simpler way is to just let the dot be a world object or use the relative scaling
-                // For now, let's just use the current logic which clamps them to the camera's view rect.
+            // --- Update Quest Dot ---
+            if (this.questDot && this.questTarget) {
+                const qRelX = this.questTarget.x - mainCam.scrollX;
+                const qRelY = this.questTarget.y - mainCam.scrollY;
+
+                const qMinimapX = this.currentPosition.x + (qRelX * this.currentScale);
+                const qMinimapY = this.currentPosition.y + (qRelY * this.currentScale);
+
+                // Check if quest target is within minimap view
+                const isWithinBounds = (
+                    qMinimapX >= this.currentPosition.x &&
+                    qMinimapX <= this.currentPosition.x + this.currentSize.w &&
+                    qMinimapY >= this.currentPosition.y &&
+                    qMinimapY <= this.currentPosition.y + this.currentSize.h
+                );
+
+                if (isWithinBounds || this.fullMap) {
+                    this.questDot.setVisible(true && this.enabled);
+                    this.questDot.setPosition(qMinimapX, qMinimapY);
+                } else {
+                    // Optionally clamp to edge to show direction? 
+                    // For now, hide if off-map to avoid confusion, or clamp like player?
+                    // Let's clamp to edge so they know direction
+                    const qClampedX = Phaser.Math.Clamp(
+                        qMinimapX,
+                        this.currentPosition.x + 4,
+                        this.currentPosition.x + this.currentSize.w - 4
+                    );
+                    const qClampedY = Phaser.Math.Clamp(
+                        qMinimapY,
+                        this.currentPosition.y + 4,
+                        this.currentPosition.y + this.currentSize.h - 4
+                    );
+                    this.questDot.setVisible(true && this.enabled);
+                    this.questDot.setPosition(qClampedX, qClampedY);
+                }
+            } else if (this.questDot) {
+                this.questDot.setVisible(false);
             }
         }
 

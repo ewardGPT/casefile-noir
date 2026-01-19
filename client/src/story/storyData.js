@@ -50,6 +50,44 @@ export const StoryData = {
             challenge: "Diamond", // "The one thing on earth that shatters not"
             default: "Who goes there?",
             success: "I assume you've come to question me about your assistant, Detective Clarke."
+        },
+        "Arthur Kosminski": {
+            default: "Edwin, focus on the evidence. We can't let this distract us.",
+            topics: {
+                "lillian": "A tragedy. truly. I knew of her, slightly.",
+                "brother": "My brother is dead to me. Don't bring him up."
+            }
+        },
+        "Lillian Harrow": {
+            default: "...",
+            topics: {}
+        },
+        "Reginald Whitcombe": {
+            default: "This is bad for the school's reputation. Make it quick, Detective.",
+            topics: {
+                "tobias": "Mr. Finch is a good teacher. A bit too dedicated, perhaps.",
+                "list": "The list? Just standard administrative records. Nothing more."
+            }
+        },
+        "Evelyn Moreland": {
+            default: "I miss her so much... why did this happen?",
+            topics: {
+                "fight": "We... we argued. Over a boy. But I didn't want this!",
+                "samuel": "Samuel wouldn't leave her alone. It was creepy."
+            }
+        },
+        "Samuel Atwell": {
+            default: "I didn't do it! I loved her!",
+            topics: {
+                "rejection": "She just didn't understand yet. We were meant to be.",
+                "woods": "I followed her once. To the tree line. Then I got scared."
+            }
+        },
+        "Aaron Kosminski": {
+            default: "Leave this place... the shadows hunt.",
+            topics: {
+                "arthur": "The 'good' brother? Hah. Ask him about the locket."
+            }
         }
     }
 };
