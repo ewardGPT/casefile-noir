@@ -1,0 +1,44 @@
+{
+  "_metadata": {
+    "version": "1.1",
+    "description": "8px sub-grid collision system for 32px tiles with partial-tile transparency support",
+    "mapDimensions": {
+      "width": 128,
+      "height": 128,
+      "tileSize": 32,
+      "subGridSize": 8
+    },
+    "alphaThreshold": {
+      "default": 128,
+      "description": "Alpha threshold (0-255) for determining if a pixel is considered opaque. Pixels with alpha >= threshold are solid.",
+      "usage": "When Agent 3 identifies transparent-but-solid pixels, only pixels passing alpha_threshold_passed are marked as collidable"
+    },
+    "format": {
+      "key": "tile coordinate as 'x,y' string (e.g., '0,0', '1,0')",
+      "value": {
+        "mask": "16-bit mask (0x0000-0xFFFF) representing 4x4 sub-grid collision",
+        "alpha_threshold_passed": "Boolean indicating if this tile was processed with alpha threshold detection",
+        "description": "Each entry represents one tile's collision data"
+      },
+      "maskBits": "Each bit represents one 8px sub-cell: bit 0 = top-left, bit 15 = bottom-right",
+      "maskValues": {
+        "0x0000": "Fully walkable (all 16 sub-cells walkable)",
+        "0xFFFF": "Fully solid (all 16 sub-cells collidable)",
+        "0x0001-0xFFFE": "Partial collision (only specific sub-cells are solid, reflecting opaque pixels only)"
+      },
+      "example": {
+        "0,0": {
+          "mask": 65535,
+          "alpha_threshold_passed": true
+        },
+        "10,20": {
+          "mask": 43690,
+          "alpha_threshold_passed": true
+        }
+      }
+    },
+    "sync": "This file is synced with COLOR_MANIFEST.js collision logic via getTileCollision() function. Agent 3 can dynamically update bitmasks to reflect only opaque pixels based on alpha threshold detection.",
+    "persistence": "Tight boundaries are persisted to prevent detective from bouncing off invisible transparent pixels after reload"
+  },
+  "collisionData": {}
+}

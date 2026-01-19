@@ -7,6 +7,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
-    "@types/node": "^25.0.8"
+    "@types/node": "^25.0.8",
+    "jest-canvas-mock": "^2.5.2"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
   }
 }

@@ -1,25 +1,12 @@
-import type { NPCData, DialogueNode } from '../data/npcs.js';
+/**
+ * NPC Entity with Billboard Nameplate System
+ * Renders dynamic nameplates that always face the camera
+ */
 
 export class NPC extends Phaser.GameObjects.Sprite {
-  public id: string;
-  public name: string;
-  public locationTag: string;
-  public dialogueLines: DialogueNode[];
-  public questHooks?: string[];
-  public suspect: boolean;
-  public nameplate: Phaser.GameObjects.Container | null = null;
-  private nameText: Phaser.GameObjects.Text | null = null;
-  private nameBg: Phaser.GameObjects.Rectangle | null = null;
-  private interactionZone: Phaser.GameObjects.Zone | null = null;
-  private nearby: boolean = false;
-
-  constructor(
-    scene: Phaser.Scene,
-    x: number,
-    y: number,
-    data: NPCData
-  ) {
+  constructor(scene, x, y, data) {
     super(scene, x, y, data.spriteKey);
+
     this.id = data.id;
     this.name = data.name;
     this.locationTag = data.locationTag;
@@ -39,24 +26,30 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.setupAnimations();
   }
 
-  private setupPhysics(): void {
+  /**
+   * Setup physics body for NPC
+   */
+  setupPhysics() {
     if (!this.scene.physics) return;
 
     this.scene.physics.world.enable(this);
-    const body = this.body as Phaser.Physics.Arcade.Body;
+    const body = this.body;
     body.setSize(30, 20);
     body.setOffset(17, 44);
     body.setCollideWorldBounds(true);
     body.setImmovable(true);
   }
 
-  private createBillboardNameplate(): void {
-    // Create container at NPC position (will be updated in update() method)
+  /**
+   * Create billboard-style nameplate that always faces camera
+   * High-contrast font with drop shadow for visibility
+   */
+  createBillboardNameplate() {
+    // Nameplate container for grouping elements
     // Position 10px above normalized sprite head (normalized height + 10px offset)
     // Since sprite origin is at bottom (0.5, 1.0), we offset by displayHeight + 10px
-    // Default to -70 if displayHeight not yet available (will be updated after normalization)
     const nameplateYOffset = -(this.displayHeight || 70) - 10;
-    this.nameplate = this.scene.add.container(this.x, this.y + nameplateYOffset);
+    this.nameplate = this.scene.add.container(0, nameplateYOffset);
 
     // Background: Semi-transparent black with white border for high contrast
     const nameBg = this.scene.add.rectangle(
@@ -69,8 +62,9 @@ export class NPC extends Phaser.GameObjects.Sprite {
     );
     nameBg.setStrokeStyle(2, 0xffffff);
     this.nameplate.add(nameBg);
-    this.nameBg = nameBg;
 
+    // Text: High-contrast white with drop shadow
+    // Drop shadow effect using shadow offset and blur
     const shadowText = this.scene.add.text(
       0,
       0,
@@ -93,6 +87,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     shadowText.setOrigin(0.5);
     this.nameplate.add(shadowText);
 
+    // Main text: White with shadow
     const nameText = this.scene.add.text(
       0,
       0,
@@ -118,13 +113,20 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.nameplate.add(nameText);
     this.nameText = nameText;
 
+    // Store background and text for styling updates
+    this.nameBg = nameBg;
+
+    // Initially hidden
     this.nameplate.setVisible(false);
     this.nameplate.setAlpha(0);
-    this.nameplate.setScrollFactor(1);
+    this.nameplate.setScrollFactor(1); // Follow camera scroll (world-space)
     this.scene.add.existing(this.nameplate);
   }
 
-  private createInteractionZone(): void {
+  /**
+   * Create interaction zone for player proximity detection
+   */
+  createInteractionZone() {
     this.interactionZone = this.scene.add.zone(
       this.x,
       this.y,
@@ -132,18 +134,20 @@ export class NPC extends Phaser.GameObjects.Sprite {
       60
     );
     this.scene.physics.world.enable(this.interactionZone);
-    const zoneBody = this.interactionZone.body as Phaser.Physics.Arcade.Body;
+    const zoneBody = this.interactionZone.body;
     zoneBody.setImmovable(true);
 
-    const sceneAsAny = this.scene as any;
+    const sceneAsAny = this.scene;
     if (sceneAsAny.interactables) {
       sceneAsAny.interactables.add(this.interactionZone);
     }
   }
 
-  private setupAnimations(): void {
+  /**
+   * Setup idle and walk animations for all directions
+   */
+  setupAnimations() {
     const spriteKey = this.texture.key;
-
     const directions = ['down', 'left', 'right', 'up'];
 
     directions.forEach(dir => {
@@ -178,7 +182,11 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.play(`${spriteKey}-idle-down`, true);
   }
 
-  public update(player: Phaser.Physics.Arcade.Sprite): void {
+  /**
+   * Update NPC logic each frame
+   * Handles billboard rotation, visibility, and proximity checks
+   */
+  update(player) {
     const distance = Phaser.Math.Distance.Between(
       this.x,
       this.y,
@@ -189,48 +197,57 @@ export class NPC extends Phaser.GameObjects.Sprite {
     const wasNearby = this.nearby;
     this.nearby = distance < 80;
 
+    // Update nameplate visibility with fade effect
     if (this.nameplate) {
-      // Update visibility based on proximity
       if (this.nearby) {
+        // Fade in
         this.nameplate.setAlpha(Phaser.Math.Clamp(this.nameplate.alpha + 0.1, 0, 1));
         this.nameplate.setVisible(true);
       } else {
+        // Fade out
         this.nameplate.setAlpha(Phaser.Math.Clamp(this.nameplate.alpha - 0.1, 0, 1));
         if (this.nameplate.alpha <= 0.05) {
           this.nameplate.setVisible(false);
         }
       }
 
-      // Update billboard rotation to always face camera
+      // Billboard rotation: Face the camera
       this.updateBillboardRotation();
-      
-      // Position nameplate above NPC sprite (persistent billboard)
-      // Offset by normalized sprite height + 10px to position 10px above head
-      // Since sprite origin is at bottom (0.5, 1.0), we offset by displayHeight + 10px
-      const nameplateYOffset = -(this.displayHeight || 70) - 10;
-      this.nameplate.setPosition(this.x, this.y + nameplateYOffset);
-      
-      // Ensure nameplate depth is above NPC sprite
-      this.nameplate.setDepth(this.depth + 10);
+
+      // Update nameplate position to follow NPC
+      this.nameplate.setPosition(this.x, this.y);
     }
 
+    // Show notification when player enters interaction range
     if (this.nearby && !wasNearby) {
-      const HUD = (window as any).HUD;
+      const HUD = window.HUD;
       if (HUD) {
         HUD.showNotification(`Press E to talk to ${this.name}`);
       }
     }
   }
 
-  private updateBillboardRotation(): void {
+  /**
+   * Billboard Logic: Rotate nameplate to always face the camera
+   * This ensures text remains readable from any camera angle
+   */
+  updateBillboardRotation() {
     if (!this.nameplate) return;
 
     const camera = this.scene.cameras.main;
+
+    // Get camera rotation
     const cameraRotation = camera.rotation;
+
+    // Apply inverse camera rotation to nameplate (billboard effect)
+    // This makes the nameplate always face the camera
     this.nameplate.setRotation(-cameraRotation);
   }
 
-  public startDialogue(): DialogueNode | null {
+  /**
+   * Get the first dialogue node for this NPC
+   */
+  startDialogue() {
     if (this.dialogueLines.length === 0) {
       return null;
     }
@@ -239,27 +256,40 @@ export class NPC extends Phaser.GameObjects.Sprite {
     return firstNode;
   }
 
-  public canInteract(): boolean {
+  /**
+   * Check if player can interact with this NPC
+   */
+  canInteract() {
     return this.nearby && this.dialogueLines.length > 0;
   }
 
-  public isNearby(): boolean {
+  /**
+   * Check if player is nearby
+   */
+  isNearby() {
     return this.nearby;
   }
 
-  public updateName(newName: string): void {
+  /**
+   * Update nameplate text (for dynamic name changes)
+   */
+  updateName(newName) {
     this.name = newName;
 
     if (this.nameText) {
       this.nameText.setText(newName);
 
+      // Update background width to match new text
       if (this.nameBg) {
         this.nameBg.width = newName.length * 9 + 24;
       }
     }
   }
 
-  public destroy(): void {
+  /**
+   * Clean up resources when NPC is destroyed
+   */
+  destroy() {
     if (this.interactionZone) {
       this.interactionZone.destroy();
     }
@@ -271,3 +301,5 @@ export class NPC extends Phaser.GameObjects.Sprite {
     super.destroy();
   }
 }
+
+export default NPC;

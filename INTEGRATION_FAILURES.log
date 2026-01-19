@@ -1,0 +1,396 @@
+# Static Analysis Integration Audit Report
+# Generated: 2026-01-19
+# Purpose: Verify all design specifications from .md documentation are compiled into executable logic
+
+================================================================================
+PHASE 1: BOOT.JS RESOURCE VERIFICATION
+================================================================================
+
+[File: Boot.js] -> [Status: PARTIALLY VERIFIED]
+
+[Issue Found #1]: Missing UI Asset Preloading
+- DIALOGUE_BOX_UI_REPORT.md specifies portrait assets for DialogueBoxUI
+- BILLBOARD_VERIFICATION_REPORT.md specifies no external assets needed (uses Phaser Graphics)
+- Current Boot.js only loads map tiles, sprites, and spawn_config.json
+- DialogueBoxUI uses 'detective' sprite as portrait fallback (line 57 in DialogueBoxUI.js)
+- No dedicated portrait assets loaded for NPCs
+
+[Proposed Fix]:
+Add portrait asset loading to Boot.js preload() method:
+
+```javascript
+// In Boot.js preload() method, after line 84:
+// Load NPC portrait images (if they exist)
+for (let i = 1; i <= 35; i++) {
+    this.load.image(`portrait_npc_${i}`, `assets/portraits/npc_${i}.png`);
+    // Note: If portraits don't exist, Phaser will log warning but continue
+}
+
+// Load dialogue UI assets (if any custom graphics exist)
+this.load.image('dialogue_frame', 'assets/ui/dialogue_frame.png');
+this.load.image('dialogue_arrow', 'assets/ui/dialogue_arrow.png');
+```
+
+[Issue Found #2]: Spawn Config Loading Verified
+- spawn_report.md specifies spawn_config.json location: client/public/spawn_config.json
+- Boot.js line 84: `this.load.json('spawn_config', 'spawn_config.json');`
+- ✅ VERIFIED: Spawn config is loaded correctly
+- ✅ VERIFIED: Game.js accesses it via `this.cache.json.get('spawn_config')` (line 764)
+
+[Status]: Spawn config integration is CORRECT
+
+================================================================================
+PHASE 2: GAME.JS INTEGRATION SCAN
+================================================================================
+
+[File: Game.js] -> [Status: MULTIPLE FAILURES DETECTED]
+
+[Issue Found #3]: Missing Route Implementation Logic
+- PATHFINDING_ANALYSIS.md specifies 3 optimal routes:
+  * Route 1: Speedrun (Police Station → School → Pennyworth Lane → Return)
+  * Route 2: Balanced (Police Station → Desk Evidence → School → Pennyworth → Woods Edge → Return)
+  * Route 3: Resource-Heavy (Police Station → All NPCs → Extended locations → Return)
+- Current Game.js has NO route selection system
+- Spawn points exist but no route waypoint navigation
+- No route efficiency tracking or route-specific objectives
+
+[Proposed Fix]:
+Add route system to Game.js:
+
+```javascript
+// Add to Game.js after questSystem initialization (around line 1247):
+
+// Route System Integration
+this.routeSystem = {
+    currentRoute: null,
+    routes: {
+        speedrun: {
+            id: 'speedrun',
+            name: 'Route 1: The Speedrun',
+            waypoints: [
+                { x: 1100, y: 1100, location: 'police_station', action: 'start' },
+                { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland'] },
+                { x: 2200, y: 2200, location: 'pennyworth_lane', npcs: ['old_willy'] },
+                { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+            ],
+            efficiencyScore: 92
+        },
+        balanced: {
+            id: 'balanced',
+            name: 'Route 2: The Balanced',
+            waypoints: [
+                { x: 1100, y: 1100, location: 'police_station', action: 'start' },
+                { x: 1152, y: 1120, location: 'police_station', action: 'collect_evidence', clueId: 'desk_receipt' },
+                { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland'] },
+                { x: 2200, y: 2200, location: 'pennyworth_lane', npcs: ['old_willy', 'mary_henshaw'] },
+                { x: 1800, y: 2600, location: 'woods_edge', npcs: ['aaron_kosminski'], optional: true },
+                { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+            ],
+            efficiencyScore: 78
+        },
+        resourceHeavy: {
+            id: 'resource_heavy',
+            name: 'Route 3: The Safe/Resource-Heavy',
+            waypoints: [
+                { x: 1100, y: 1100, location: 'police_station', npcs: ['edwin_clarke', 'arthur_kosminski', 'mr_ashcombe'] },
+                { x: 1152, y: 1120, location: 'police_station', action: 'collect_evidence' },
+                { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland', 'samuel_atwell', 'beatrice_holloway', 'clara_redford', 'james_calder', 'mrs_loxley'] },
+                { x: 2200, y: 2400, location: 'pennyworth_lane', npcs: ['old_willy', 'mary_henshaw', 'mr_cobb'] },
+                { x: 2400, y: 2800, location: 'harrow_residence', npcs: ['mr_harrow', 'mrs_harrow', 'peter_harrow'] },
+                { x: 3000, y: 2200, location: 'risky_passage', npcs: ['ada_merriweather'] },
+                { x: 3200, y: 2400, location: 'lions_den', action: 'reconnaissance' },
+                { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+            ],
+            efficiencyScore: 55
+        }
+    },
+    
+    selectRoute(routeId) {
+        this.currentRoute = this.routes[routeId];
+        if (this.currentRoute) {
+            console.log(`Route selected: ${this.currentRoute.name}`);
+            this.questSystem.setRouteObjectives(this.currentRoute);
+        }
+    },
+    
+    getCurrentWaypoint() {
+        if (!this.currentRoute) return null;
+        // Implementation would track current waypoint index
+        return this.currentRoute.waypoints[0];
+    }
+};
+
+// Initialize route system
+this.routeSystem.selectRoute('balanced'); // Default to balanced route
+```
+
+[Issue Found #4]: QuestDialogueController Integration Incomplete
+- QUEST_DIALOGUE_CONTROLLER_REPORT.md specifies [ACTION_BUTTON] variable injection
+- Current Game.js line 1254-1256: Only sets quest context, does NOT process dialogue injection
+- DialogueBoxUI.js line 10: Creates QuestAwareDialogueController but doesn't use it for text processing
+- Missing: Dialogue text enhancement with button prompts
+
+[Proposed Fix]:
+Update DialogueBoxUI to use QuestAwareDialogueController for text processing:
+
+```javascript
+// In DialogueBoxUI.js, modify startDialogue method (around line 300):
+
+startDialogue(npcId, startNodeId = null) {
+    // ... existing code ...
+    
+    // NEW: Process dialogue with quest-aware injection
+    if (this.dialogueController && this.currentNode) {
+        const questId = this.dialogueController.currentQuestId;
+        const objectiveId = this.dialogueController.currentObjectiveId;
+        
+        // Process base dialogue text with quest injection
+        const enhancedText = this.dialogueController.processDialogue(
+            this.currentNode.text,
+            npcId,
+            questId,
+            objectiveId
+        );
+        
+        // Use enhanced text instead of raw text
+        this.playTypewriterEffect(enhancedText);
+    } else {
+        // Fallback to original behavior
+        this.playTypewriterEffect(this.currentNode.text);
+    }
+}
+```
+
+[Issue Found #5]: How To Play UI Missing "Developer FN" Section
+- HOW_TO_PLAY_ENHANCED_REPORT.md mentions "Developer FN" section
+- Current HowToPlayUI.js has sections: MOVEMENT, ACTIONS, MENUS, GAMEPLAY TIPS
+- NO "Developer FN" or developer/debug keybinds section found
+
+[Proposed Fix]:
+Add Developer/Debug section to HowToPlayUI.js:
+
+```javascript
+// In HowToPlayUI.js createUI() method, after GAMEPLAY TIPS section (around line 290):
+
+// Section: DEVELOPER / DEBUG CONTROLS
+this.addSectionHeader("DEVELOPER / DEBUG", currentY);
+currentY += 35;
+
+const debugItems = [
+    { label: "Debug Overlay", key: "[ F2 ]" },
+    { label: "Physics Debug", key: "[ F3 ]" },
+    { label: "NPC Debug Markers", key: "[ F4 ]" },
+    { label: "Minimap Toggle", key: "[ F7 ]" },
+    { label: "Mute Audio", key: "[ K ]" },
+];
+
+debugItems.forEach(item => {
+    const itemLabel = this.scene.add.text(15, currentY, item.label, {
+        fontFamily: "'Georgia', serif",
+        fontSize: "15px",
+        color: "#c0d0e0",
+    });
+    this.scrollContainer.add(itemLabel);
+    
+    const keybind = createKeybindBox(item.key, rightColumn + 20, currentY);
+    this.scrollContainer.add([keybind.box, keybind.label]);
+    
+    currentY += rowHeight + 5;
+});
+
+// Update content height
+const contentHeight = currentY + 20;
+this.scrollContainer.setSize(boxWidth, contentHeight);
+```
+
+[Issue Found #6]: Spawn Points Active but Not Fully Integrated
+- spawn_report.md specifies 3 persistent spawn points + default
+- Game.js lines 762-801: Spawn config is loaded and used
+- ✅ VERIFIED: Spawn points are active and override default spawn
+- ⚠️ PARTIAL: No UI for spawn point selection
+- ⚠️ PARTIAL: No spawn point persistence tracking in gameState
+
+[Proposed Fix]:
+Add spawn point selection UI and persistence:
+
+```javascript
+// Add to Game.js create() method, after spawn config loading:
+
+// Spawn Point Persistence
+if (!this.gameState) {
+    this.gameState = loadGameState();
+}
+
+// Save spawn point selection
+this.saveSpawnSelection = (spawnId) => {
+    if (!this.gameState.spawnState) {
+        this.gameState.spawnState = {};
+    }
+    this.gameState.spawnState.activeSpawnId = spawnId;
+    this.gameState.spawnState.lastSpawnTimestamp = Date.now();
+    // Save to localStorage
+    localStorage.setItem('casefile_noir_save', JSON.stringify(this.gameState));
+};
+
+// Load spawn point selection (already implemented in lines 767-776)
+```
+
+================================================================================
+PHASE 3: COLLISION & RESOLUTION AUDIT
+================================================================================
+
+[File: Game.js] -> [Status: VERIFIED WITH MINOR ISSUES]
+
+[Issue Found #7]: Hardcoded Coordinates Match spawn_report.md
+- spawn_report.md specifies:
+  * spawn_speedrun: [2200, 2200, 0]
+  * spawn_balanced: [1600, 1600, 0]
+  * spawn_resource: [3000, 2200, 0]
+  * spawn_default: [1100, 1100, 0]
+- Game.js lines 782-784: Uses spawnConfig.coordinates (dynamic, not hardcoded)
+- ✅ VERIFIED: No hardcoded coordinates contradict spawn_report.md
+- ✅ VERIFIED: Coordinates are loaded from spawn_config.json
+
+[Issue Found #8]: Skip Button Event Listener Verified
+- DIALOGUE_BOX_UI_REPORT.md specifies Skip button (B key + UI button)
+- DialogueBoxUI.js lines 102-128: Skip button created
+- DialogueBoxUI.js lines 132-137: B key listener added
+- DialogueBoxUI.js line 125: Skip button click handler: `this.handleSkip()`
+- ✅ VERIFIED: Skip button event listeners are properly implemented
+
+[Issue Found #9]: Missing Route Waypoint Visualization
+- PATHFINDING_ANALYSIS.md specifies waypoint sequences for each route
+- Game.js has no visual waypoint markers or route path visualization
+- No minimap integration for route waypoints
+
+[Proposed Fix]:
+Add route waypoint visualization:
+
+```javascript
+// Add to Game.js after routeSystem initialization:
+
+// Route Waypoint Visualization
+this.routeWaypoints = this.add.group();
+this.showRouteWaypoints = (routeId) => {
+    this.routeWaypoints.clear(true, true);
+    
+    const route = this.routeSystem.routes[routeId];
+    if (!route) return;
+    
+    route.waypoints.forEach((waypoint, index) => {
+        const marker = this.add.circle(waypoint.x, waypoint.y, 8, 0xffd700, 0.8);
+        marker.setStrokeStyle(2, 0xffffff);
+        marker.setDepth(100);
+        
+        const label = this.add.text(waypoint.x, waypoint.y - 15, `${index + 1}`, {
+            fontSize: '12px',
+            color: '#ffffff',
+            backgroundColor: '#000000',
+            padding: { x: 4, y: 2 }
+        });
+        label.setOrigin(0.5);
+        label.setDepth(101);
+        
+        this.routeWaypoints.add([marker, label]);
+    });
+};
+
+// Call when route is selected
+this.routeSystem.selectRoute('balanced');
+this.showRouteWaypoints('balanced');
+```
+
+================================================================================
+SUMMARY OF FINDINGS
+================================================================================
+
+Total Issues Found: 9
+Critical Failures: 3
+  - Missing Route Implementation Logic (#3)
+  - QuestDialogueController Integration Incomplete (#4)
+  - Missing Developer FN Section in How To Play (#5)
+
+Medium Priority: 4
+  - Missing UI Asset Preloading (#1)
+  - Missing Route Waypoint Visualization (#9)
+  - Spawn Points Not Fully Integrated (#6)
+  - No spawn point selection UI
+
+Verified Correct: 2
+  - Spawn Config Loading (#2)
+  - Skip Button Event Listeners (#8)
+  - Hardcoded Coordinates Match Documentation (#7)
+
+================================================================================
+RECOMMENDED ACTION ITEMS
+================================================================================
+
+1. [CRITICAL] Implement Route System (#3)
+   - Add route selection logic
+   - Integrate with QuestSystem
+   - Add waypoint tracking
+
+2. [CRITICAL] Complete QuestDialogueController Integration (#4)
+   - Update DialogueBoxUI to use controller.processDialogue()
+   - Ensure button prompts are injected into dialogue text
+
+3. [HIGH] Add Developer/Debug Section to How To Play (#5)
+   - Add F2, F3, F4, F7, K keybinds section
+
+4. [MEDIUM] Add Portrait Asset Loading (#1)
+   - Load NPC portrait images if they exist
+   - Fallback to detective sprite if missing
+
+5. [MEDIUM] Add Route Waypoint Visualization (#9)
+   - Visual markers for route waypoints
+   - Minimap integration
+
+6. [LOW] Add Spawn Point Selection UI (#6)
+   - Menu for selecting spawn points
+   - Visual spawn point indicators
+
+================================================================================
+VERIFICATION STATUS BY DOCUMENT
+================================================================================
+
+[PATHFINDING_ANALYSIS.md] -> [Status: PARTIALLY INTEGRATED]
+- ✅ Spawn coordinates match documentation
+- ❌ Route logic not implemented
+- ❌ Waypoint sequences not tracked
+- ❌ Route efficiency scoring not implemented
+
+[spawn_report.md] -> [Status: VERIFIED]
+- ✅ Spawn config loaded correctly
+- ✅ Coordinates match documentation
+- ✅ Spawn points active in game world
+- ⚠️ No spawn selection UI
+
+[BILLBOARD_VERIFICATION_REPORT.md] -> [Status: VERIFIED]
+- ✅ Billboard nameplate system implemented
+- ✅ Camera-facing rotation working
+- ✅ High-contrast styling applied
+- ✅ No external assets needed (uses Phaser Graphics)
+
+[DIALOGUE_BOX_UI_REPORT.md] -> [Status: VERIFIED]
+- ✅ Pokémon-style dialogue box implemented
+- ✅ Skip button (B key + UI) working
+- ✅ Typewriter effect implemented
+- ✅ Flashing arrow indicator working
+- ⚠️ Portrait assets not preloaded (uses fallback)
+
+[QUEST_DIALOGUE_CONTROLLER_REPORT.md] -> [Status: INCOMPLETE]
+- ✅ QuestAwareDialogueController created
+- ✅ Quest registry structure correct
+- ❌ Dialogue injection not applied to displayed text
+- ❌ Button prompts not concatenated to dialogue
+
+[HOW_TO_PLAY_ENHANCED_REPORT.md] -> [Status: PARTIALLY INTEGRATED]
+- ✅ Scrollable UI implemented
+- ✅ Movement, Actions, Menus sections present
+- ✅ Pokemon-style keybind graphics
+- ❌ Missing "Developer FN" section
+- ❌ Missing debug keybinds documentation
+
+================================================================================
+END OF AUDIT REPORT
+================================================================================

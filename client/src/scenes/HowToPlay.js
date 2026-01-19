@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { HowToPlayUI } from "../ui/HowToPlayUI.js";
 
 export default class HowToPlay extends Phaser.Scene {
     constructor() {
@@ -15,76 +16,14 @@ export default class HowToPlay extends Phaser.Scene {
         const vignette = this.add.graphics();
         vignette.fillStyle(0x000000, 0.3);
         vignette.fillRect(0, 0, width, height);
+        vignette.setScrollFactor(0);
+        vignette.setDepth(1);
 
-        // --- Title ---
-        this.add.text(width / 2 + 3, 80 + 3, "HOW TO PLAY", {
-            fontFamily: "'Georgia', serif",
-            fontSize: "48px",
-            color: "#000000",
-        }).setOrigin(0.5).setAlpha(0.5);
-
-        this.add.text(width / 2, 80, "HOW TO PLAY", {
-            fontFamily: "'Georgia', serif",
-            fontSize: "48px",
-            color: "#d4af37",
-            stroke: "#1a1a1a",
-            strokeThickness: 4,
-        }).setOrigin(0.5);
-
-        // --- Controls Section ---
-        const controlsY = 180;
-        const controls = [
-            ["WASD / Arrow Keys", "Move around"],
-            ["E", "Interact with objects"],
-            ["TAB", "Open notebook"],
-            ["ESC", "Close menus"],
-        ];
-
-        controls.forEach((ctrl, i) => {
-            const y = controlsY + i * 45;
-
-            // Key
-            this.add.text(width / 2 - 120, y, ctrl[0], {
-                fontFamily: "monospace",
-                fontSize: "20px",
-                color: "#d4af37",
-                backgroundColor: "#1a2030",
-                padding: { left: 10, right: 10, top: 5, bottom: 5 },
-            }).setOrigin(1, 0.5);
-
-            // Description
-            this.add.text(width / 2 - 100, y, ctrl[1], {
-                fontFamily: "'Georgia', serif",
-                fontSize: "20px",
-                color: "#c0c0c0",
-            }).setOrigin(0, 0.5);
-        });
-
-        // --- Goal Section ---
-        const goalY = controlsY + controls.length * 45 + 60;
-
-        this.add.text(width / 2, goalY, "— Your Mission —", {
-            fontFamily: "'Georgia', serif",
-            fontSize: "24px",
-            fontStyle: "italic",
-            color: "#d4af37",
-        }).setOrigin(0.5);
-
-        this.add.text(width / 2, goalY + 50,
-            `Collect evidence from crime scenes.
-Interrogate suspects and witnesses.
-Find contradictions in their stories.
-Identify and accuse the culprit.`,
-            {
-                fontFamily: "'Georgia', serif",
-                fontSize: "18px",
-                color: "#9aa4b2",
-                align: "center",
-                lineSpacing: 8,
-            }).setOrigin(0.5, 0);
-
-        // --- Back Button ---
-        const back = this.add.text(width / 2, height - 80, "←  BACK TO MENU", {
+        // --- Enhanced UI Component (Pokemon-themed scrollable) ---
+        this.howToPlayUI = new HowToPlayUI(this);
+        
+        // --- Back Button (Fixed at bottom) ---
+        const back = this.add.text(width / 2, height - 50, "←  BACK TO MENU", {
             fontFamily: "'Georgia', serif",
             fontSize: "24px",
             color: "#ffffff",
@@ -93,10 +32,12 @@ Identify and accuse the culprit.`,
             stroke: "#3a4a5a",
             strokeThickness: 1,
         }).setOrigin(0.5);
+        back.setScrollFactor(0);
+        back.setDepth(100);
 
         back.setInteractive({ useHandCursor: true });
 
-        // Defensive check: remove existing listeners if scene is restarting
+        // Clean up existing listeners
         if (this.input && this.input.keyboard) {
             this.input.keyboard.removeAllListeners("keydown-ESC");
         }
@@ -104,6 +45,7 @@ Identify and accuse the culprit.`,
             this.tweens.killAll();
         }
 
+        // Back button hover effects
         back.on("pointerover", () => {
             this.tweens.add({
                 targets: back,
@@ -133,17 +75,18 @@ Identify and accuse the culprit.`,
             }
         });
 
-        // Store button reference for cleanup
-        this.backButton = back;
+        // ESC to go back
         this.escHandler = () => {
             try {
                 this.scene.start("StartMenu");
             } catch (error) {
                 console.error("Failed to start StartMenu scene:", error);
-                throw error;
             }
         };
         this.input.keyboard.once("keydown-ESC", this.escHandler);
+
+        // Store reference for cleanup
+        this.backButton = back;
     }
 
     shutdown() {
@@ -151,13 +94,19 @@ Identify and accuse the culprit.`,
         if (this.input && this.input.keyboard) {
             this.input.keyboard.removeAllListeners("keydown-ESC");
         }
-        
+
+        // Remove UI component
+        if (this.howToPlayUI) {
+            this.howToPlayUI.destroy();
+            this.howToPlayUI = null;
+        }
+
         // Remove button listeners
         if (this.backButton) {
             this.backButton.removeAllListeners();
             this.backButton = null;
         }
-        
+
         // Clean up tweens
         if (this.tweens) {
             this.tweens.killAll();

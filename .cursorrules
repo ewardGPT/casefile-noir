@@ -1,0 +1,39 @@
+{
+  "project_identity": {
+    "name": "Captive Horror",
+    "theme": "Zelda-style 2D Detective Horror / Murder Mystery",
+    "aesthetic": "Pokemon-style GBA/3DS (Typewriter text, billboard nameplates, pixel-art UI)"
+  },
+  "rules": [
+    {
+      "id": "DETERMINISTIC_LOGIC",
+      "instruction": "Follow DAIR-AI principles. Use Chain-of-Thought (CoT) and ReAct frameworks for all code generation to minimize hallucinations and ensure logical consistency."
+    },
+    {
+      "id": "PROTECT_DEVELOPER_FUNCTIONS",
+      "instruction": "Do NOT delete or refactor functions mapped to F-keys (F1, F5, F8, F11, F12). These are essential Developer Tools for the Hackathon audit process."
+    },
+    {
+      "id": "SOURCE_OF_TRUTH",
+      "instruction": "Always cross-reference PATHFINDING_ANALYSIS.md, spawn_report.md, and quest_registry.js before modifying player coordinates or tilemap collisions."
+    },
+    {
+      "id": "COLLISION_VALIDATION",
+      "instruction": "Implement the 'Extraneous Validation Process' for all movement logic. If a visual shadow or boundary causes a [TILE GUARD] rollback, prioritize the navigation routes defined in the documentation over the tilemap collision property."
+    },
+    {
+      "id": "VITE_ESM_COMPLIANCE",
+      "instruction": "All imports must be explicit ESM. Avoid dual extensions (e.g., .json.js). Ensure src/data/npcs.js and src/systems/quest_registry.js are maintained as the primary data modules."
+    },
+    {
+      "id": "UI_CONSISTENCY",
+      "instruction": "Maintain the Pokemon-inspired UI style: 2D pixel fonts, typewriter text animations, billboard overhead nameplates, and the 'Skip' (B/Shift) functionality."
+    }
+  ],
+  "preferred_file_structure": {
+    "data": "src/data/",
+    "systems": "src/systems/",
+    "ui": "src/ui/",
+    "scenes": "src/scenes/"
+  }
+}

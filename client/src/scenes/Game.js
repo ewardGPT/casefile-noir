@@ -1,6 +1,9 @@
 import NotebookUI from '../ui/NotebookUI.js';
+import { NPC } from '../entities/NPC.js';
+import { getNPCById } from '../data/npcs.js';
 import EvidenceModal from '../ui/EvidenceModal.js';
 import InterrogationUI from '../ui/InterrogationUI.js';
+import { DialogueBoxUI } from '../ui/DialogueBoxUI.js';
 import DemoPanel from '../ui/DemoPanel.js';
 import {
     loadGameState,
@@ -23,6 +26,8 @@ import { StoryData } from '../story/storyData.js';
 // import { Minimap } from '../utils/minimap.js'; // Commented out - using dynamic import instead
 import { QuestSystem } from '../utils/QuestSystem.js';
 import { QuestUI } from '../ui/QuestUI.js';
+import { QuestTrackerUI } from '../ui/QuestTrackerUI.js';
+import { QUEST_ITEMS, getAllQuestItemLocations } from '../data/quest_items.js';
 import Phaser from 'phaser';
 
 export default class GameScene extends Phaser.Scene {
@@ -51,6 +56,9 @@ export default class GameScene extends Phaser.Scene {
     static ACTOR_BODY_CIRCLE_OFFSET_X = 32; // Center of 64px frame
     static ACTOR_BODY_CIRCLE_OFFSET_Y = 57; // Slightly above bottom for feet
 
+    // 8px Sub-Grid Collision System
+    static SUB_GRID_SIZE = 8; // 8px sub-grid cells (32px tile / 4 = 8px cells)
+
     // Legacy NPC constants (deprecated - use ACTOR_* constants instead)
     static NPC_SCALE = 1.0;
     static NPC_FRAME_W = 64; // Updated from 32 to match actual frame size
@@ -67,6 +75,64 @@ export default class GameScene extends Phaser.Scene {
     init(data) {
         console.log("Game.init started with data:", data);
         this.mapDebugData = data?.mapDebugData || this.registry.get("mapDebugData") || {};
+
+        // Dual-Layer Pathfinding Validation Helper
+        this.isCoordinateInPath = (x, y) => {
+            // Initialize Pathfinding.validRoutes using data from PATHFINDING_ANALYSIS.md
+            if (!this.pathfinding) this.pathfinding = {};
+            this.pathfinding.validRoutes = [
+            {
+                id: 'speedrun',
+                name: 'Route 1: The Speedrun',
+                waypoints: [
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Start)'},
+                    {x1: 1400, y1: 1400, x2: 1800, y2: 1800, description: 'School'},
+                    {x1: 2000, y1: 2000, x2: 2400, y2: 2400, description: 'Pennyworth Lane'},
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Return)'}
+                ]
+            },
+            {
+                id: 'balanced',
+                name: 'Route 2: The Balanced',
+                waypoints: [
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Start)'},
+                    {x1: 1152, y1: 1120, x2: 1152, y2: 1120, description: 'Desk Evidence'},
+                    {x1: 1400, y1: 1400, x2: 1800, y2: 1800, description: 'School'},
+                    {x1: 2000, y1: 2000, x2: 2400, y2: 2400, description: 'Pennyworth Lane'},
+                    {x1: 1800, y1: 2600, x2: 1800, y2: 2600, description: 'Woods Edge'},
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Return)'}
+                ]
+            },
+            {
+                id: 'safe',
+                name: 'Route 3: The Safe/Resource-Heavy',
+                waypoints: [
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Start)'},
+                    {x1: 1152, y1: 1120, x2: 1152, y2: 1120, description: 'Desk Evidence'},
+                    {x1: 1400, y1: 1400, x2: 1800, y2: 1800, description: 'School'},
+                    {x1: 2000, y1: 2000, x2: 2400, y2: 2400, description: 'Pennyworth Lane'},
+                    {x1: 2400, y1: 2400, x2: 2800, y2: 2800, description: 'Harrow Residence'},
+                    {x1: 1800, y1: 2600, x2: 2400, y2: 2800, description: 'Risky Passage'},
+                    {x1: 2800, y1: 2000, x2: 3200, y2: 2400, description: 'Lions Den'},
+                    {x1: 1100, y1: 1100, x2: 1100, y2: 1100, description: 'Police Station (Return)'}
+                ]
+            }
+        ];
+
+            // Pathfinding.validRoutes has been initialized with predefined data
+            if (!this.pathfinding?.validRoutes) {
+                console.warn("Pathfinding routes are not initialized.");
+                return false;
+            }
+
+            const isValid = this.pathfinding.validRoutes.some((route) => {
+                return x >= route.x1 && x <= route.x2 && y >= route.y1 && y <= route.y2;
+            });
+            console.log(
+                `Pathfinding validation at (${x},${y}): ${isValid ? "VALID" : "BLOCKED"}`
+            );
+            return isValid;
+        };
 
         // --- NPC DIAGNOSTICS (User Step 1-8) ---
         // Step 1: will happen in create (layer logging)
@@ -117,8 +183,7 @@ export default class GameScene extends Phaser.Scene {
             explanation: 'The suspect had access, motive, and left a paper trail.'
         };
 
-        // --- 1. Map & Bounds ---
-        console.log("Game.create started");
+        // --- 1. Map & Bounds ---\n        console.log(\"Game.create started\");\n\n        // Disable shadows near boundaries\n        const boundaries = this.findObjectLayer('Collisions')?.objects || [];\n        console.log(`Boundary layer loaded with ${boundaries.length} objects.`);\n\n        const disableShadowsNearBoundaries = (object) => {\n            boundaries.forEach(boundary => {\n                // Boundary object positions\n                const boundaryX = boundary.x;\n                const boundaryY = boundary.y;\n                const boundaryWidth = boundary.width;\n                const boundaryHeight = boundary.height;\n\n                // Check if object intersects boundary (with a threshold of 0.5 units)\n                if (\n                    object.x + object.width * 0.5 >= boundaryX &&\n                    object.x - object.width * 0.5 <= boundaryX + boundaryWidth &&\n                    object.y + object.height * 0.5 >= boundaryY &&\n                    object.y - object.height * 0.5 <= boundaryY + boundaryHeight\n                ) {\n                    console.log(`Disabling shadows for object ${object.name || '(unnamed)'} near boundary.`);\n                    object.castShadow = false;\n                    object.receiveShadow = false;\n                }\n            });\n        };\n\n        // Apply shadow rules to all objects in layers\n        ['NPCs', 'Interactables'].forEach(layerName => {\n            const layer = this.findObjectLayer(layerName)?.objects || [];\n            layer.forEach(disableShadowsNearBoundaries);\n        });\n\n        // Force shadow map update to clear visual artifacts\n        if (this.lights) {\n            console.log(\"Updating shadow map...\");\n            this.lights.disable(); // Disable and re-enable to refresh shadow rendering\n            this.lights.enable();\n        }
         if (!this.cache.tilemap.exists('city_map')) {
             console.error("Game Scene: 'city_map' key not found in cache. Map loading was disabled or failed.");
             this.add.text(100, 100, "DEBUG MODE: MAP DISABLED", { fontSize: '32px', color: '#ff0000' });
@@ -261,6 +326,10 @@ export default class GameScene extends Phaser.Scene {
             // Note: Collision source detection is done after try/catch block
             // to ensure variables are in scope when collision setup runs
 
+            // Shadow Culling: Track shadow layers to ensure they don't block movement
+            this.shadowLayers = [];
+            const shadowLayerKeywords = ['Shadow', 'shadow', 'Shadows', 'shadows', 'Dark', 'dark'];
+
             // Dynamically load all layers from the map (visual layers only)
             map.layers.forEach(layerData => {
                 const name = layerData.name;
@@ -283,6 +352,17 @@ export default class GameScene extends Phaser.Scene {
                     // Visual layers have NO collision - collision comes from dedicated source only
                     console.log(`Game.create: Visual layer ${name} (no collision)`);
 
+                    // Shadow Culling: Identify and mark shadow layers
+                    const isShadowLayer = shadowLayerKeywords.some(keyword => name.includes(keyword));
+                    if (isShadowLayer) {
+                        this.shadowLayers.push(name);
+                        console.log(`🔍 Shadow Culling: Marked layer "${name}" as shadow-only (no collision)`);
+                    }
+
+                    // Explicitly disable collision on all visual layers (including shadows)
+                    layer.setCollisionByProperty({ collides: false });
+                    layer.setCollisionByExclusion([]); // Clear any collision
+
                     // Set depth high for "overhead" layers like Roofs
                     if (name.includes('Roof') || name.includes('Top')) {
                         layer.setDepth(15);
@@ -292,6 +372,9 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
             console.log("Game.create: Visual layers done.");
+            if (this.shadowLayers.length > 0) {
+                console.log(`🔍 Shadow Culling: ${this.shadowLayers.length} shadow layer(s) identified and excluded from collision:`, this.shadowLayers);
+            }
 
             // World Bounds - Always match map size exactly
             const mapWidth = map.widthInPixels;
@@ -322,6 +405,24 @@ export default class GameScene extends Phaser.Scene {
                 this.mapH = debugData.mapH;
                 console.log(`Game.create: Blocked tiles initialized (${this.mapW}x${this.mapH})`);
             }
+
+            // --- INITIALIZE 8px SUB-GRID COLLISION SYSTEM FROM collision_map.json ---
+            // Load sub-grid collision data from Agent 1's collision_map.json
+            try {
+                const collisionMapData = this.cache.json.get('collision_map');
+                if (collisionMapData && collisionMapData.collisionData) {
+                    this.subGridCollisionData = collisionMapData.collisionData;
+                    console.log(`✅ Sub-grid collision data loaded: ${Object.keys(this.subGridCollisionData).length} tiles`);
+                } else {
+                    // Initialize empty sub-grid collision data
+                    this.subGridCollisionData = {};
+                    console.log('⚠️ No sub-grid collision data found, initializing empty');
+                }
+            } catch (e) {
+                console.warn('⚠️ Failed to load collision_map.json:', e);
+                this.subGridCollisionData = {};
+            }
+
 
         } catch (error) {
             console.error("Game.create FATAL ERROR:", error);
@@ -756,6 +857,47 @@ export default class GameScene extends Phaser.Scene {
             });
         }
 
+        // --- SPAWN CONFIG OVERRIDE ---
+        try {
+            const spawnConfig = this.cache.json.get('spawn_config');
+            // Try to get saved spawn from gameState (accessed via global or helper if needed)
+            // For now, check localStorage directly as a fallback or use default
+            const savedStateStr = localStorage.getItem('casefile_noir_save');
+            let targetSpawnId = 'spawn_default';
+            if (savedStateStr) {
+                try {
+                    const parsed = JSON.parse(savedStateStr);
+                    if (parsed.spawnState && parsed.spawnState.activeSpawnId) {
+                        targetSpawnId = parsed.spawnState.activeSpawnId;
+                    }
+                } catch (e) { }
+            }
+
+            if (spawnConfig && spawnConfig.spawnPoints) {
+                const point = spawnConfig.spawnPoints.find(p => p.id === targetSpawnId);
+                // Only override if point exists AND (targetSpawnId is not default OR map didn't provide good spawn)
+                if (point) {
+                    spawnX = point.coordinates.x;
+                    spawnY = point.coordinates.y;
+                    spawnSource = `Spawn Config: ${point.name} (${targetSpawnId})`;
+
+                    // Re-validate against blocked tiles just in case config is stale
+                    if (this.blockedTiles && this.mapW && this.mapH) {
+                        const tx = Math.floor(spawnX / tileW);
+                        const ty = Math.floor(spawnY / tileH);
+                        if (this.isTileBlocked(tx, ty)) {
+                            console.warn(`⚠️ Config spawn ${targetSpawnId} is blocked! Finding nearest.`);
+                            const nearest = this.findNearestWalkableTile(tx, ty);
+                            if (nearest) {
+                                spawnX = nearest.tx * tileW + tileW / 2;
+                                spawnY = nearest.ty * tileH + tileH / 2;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) { console.warn("Spawn Config Override Failed", e); }
+
         // Log spawn coordinates
         const spawnTileX = Math.floor(spawnX / tileW);
         const spawnTileY = Math.floor(spawnY / tileH);
@@ -882,6 +1024,7 @@ export default class GameScene extends Phaser.Scene {
         const interactLayer = this.findObjectLayer ? this.findObjectLayer('Interactables') : map.getObjectLayer('Interactables');
         this.interactionTarget = null;
         this.interactionType = null;
+        this.nearestNPC = null; // Store nearest NPC for interaction prompts
         this.evidenceCatalog = [];
         this.suspectCatalog = [];
         this.suspectLocations = {};
@@ -965,16 +1108,26 @@ export default class GameScene extends Phaser.Scene {
         }
 
         // --- 6. Prompt ---
-        this.promptText = this.add.text(16, 16, 'Press E to interact', {
-            fontFamily: "'Georgia', serif",
-            fontSize: '14px',
+        // CRITICAL FIX: Interaction prompt with high depth to ensure visibility
+        // Positioned below Quest Tracker (100px from top) to avoid overlap
+        this.promptText = this.add.text(16, 130, 'Press [E] to interact', {
+            fontFamily: 'Courier New, Courier, monospace', // Captive Horror pixel font
+            fontSize: '16px',
             color: '#ffffff',
-            backgroundColor: '#000000aa',
-            padding: { x: 6, y: 4 }
+            backgroundColor: '#000000',
+            padding: { x: 10, y: 6 },
+            stroke: '#b4945a', // Gold stroke (Noir style)
+            strokeThickness: 2
         });
-        this.promptText.setScrollFactor(0);
-        this.promptText.setDepth(1000);
+        this.promptText.setScrollFactor(0); // Fixed to screen
+        this.promptText.setDepth(10002); // Very high depth - above Quest Tracker
         this.promptText.setVisible(false);
+        this.promptText.setAlpha(1.0); // Force full opacity
+        
+        // CRITICAL: Create fallback HTML overlay for interaction prompt if Phaser fails
+        this.createFallbackInteractionPrompt();
+        
+        console.log('✅ Interaction prompt initialized');
 
         // --- 7. Camera ---
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -1068,6 +1221,13 @@ export default class GameScene extends Phaser.Scene {
         this.dayNightCycle.init();
 
         // --- 8.7. Minimap System (STEP 6) ---
+
+this.questSystem.events.on('quest-update', (activeQuest) => {
+    if (this.minimap) {
+        console.log('[DEBUG] Minimap received quest-update event:', activeQuest);
+        this.minimap.setQuestTarget(activeQuest?.target || null);
+    }
+});
         // Safety: Use dynamic import to handle old builds that don't have Minimap
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:657', message: 'Attempting to load Minimap dynamically', data: { scene: 'Game' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
@@ -1171,6 +1331,7 @@ export default class GameScene extends Phaser.Scene {
         this.notebookUI.setAccuseHandler((suspectId) => this.handleAccuse(suspectId));
         this.evidenceModal = new EvidenceModal();
         this.interrogationUI = new InterrogationUI({ storyData: StoryData });
+        this.dialogueUI = new DialogueBoxUI(this);
         this.demoPanel = new DemoPanel({
             onJump: (id) => this.jumpToSuspect(id),
             onAddEvidence: () => this.addAllEvidenceToNotebook(),
@@ -1191,6 +1352,8 @@ export default class GameScene extends Phaser.Scene {
         this.spawnNPCs().then(() => {
             // Run collision audit after NPCs are spawned
             this.runCollisionAudit();
+            // Spawn quest items after NPCs
+            this.spawnQuestItems();
         }).catch(err => {
             console.error('Error spawning NPCs:', err);
         });
@@ -1201,11 +1364,125 @@ export default class GameScene extends Phaser.Scene {
         // --- 12. Quest System & Navigation ---
         this.questSystem = new QuestSystem(this);
         this.questUI = new QuestUI(this);
+        // Quest Tracker UI (persistent overlay in top-left)
+        this.questTrackerUI = new QuestTrackerUI(this);
+        
+        // CRITICAL FIX: Force-show Quest Tracker and verify it's rendering
+        if (this.questTrackerUI) {
+            this.questTrackerUI.show();
+            this.questTrackerUI.refresh();
+            console.log('✅ Quest Tracker UI initialized and shown');
+        }
+        
+        // DEBUG: Log active quest to verify data flow
+        const activeQuest = this.questSystem.getActiveQuest();
+        console.log('🔍 Active Quest:', activeQuest);
+        if (activeQuest) {
+            console.log('   Quest ID:', activeQuest.id);
+            console.log('   Quest Title:', activeQuest.title);
+            console.log('   Quest Objective:', activeQuest.objective);
+        } else {
+            console.log('⚠️ No active quest found - Quest Tracker will show default message');
+            // Force quest tracker to show even if no active quest
+            if (this.questTrackerUI) {
+                this.questTrackerUI.setQuest('day_1_investigation', 'obj_interview_finch');
+            }
+        }
 
         this.questSystem.events.on('quest-update', (quest) => {
+            console.log('📋 Quest Update Event:', quest);
             this.questUI.updateQuest(quest);
+            if (this.questTrackerUI) {
+                this.questTrackerUI.refresh(); // Update persistent quest tracker
+                this.questTrackerUI.show(); // Force-show after refresh
+            }
             this.updateQuestNavigation(quest);
+            // Update Dialogue Controller Context
+            if (this.dialogueUI && this.dialogueUI.dialogueController) {
+                this.dialogueUI.dialogueController.setQuestContext(quest ? quest.id : null);
+            }
         });
+        
+        // Force initial quest display after a short delay to ensure everything is loaded
+        this.time.delayedCall(500, () => {
+            if (this.questTrackerUI) {
+                this.questTrackerUI.refresh();
+                this.questTrackerUI.show();
+                console.log('🔄 Quest Tracker UI refreshed after delay');
+            }
+        });
+
+        // --- 12.5. Route System Integration (from PATHFINDING_ANALYSIS.md) ---
+        this.routeSystem = {
+            currentRoute: null,
+            currentWaypointIndex: 0,
+            routes: {
+                speedrun: {
+                    id: 'speedrun',
+                    name: 'Route 1: The Speedrun',
+                    waypoints: [
+                        { x: 1100, y: 1100, location: 'police_station', action: 'start' },
+                        { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland'] },
+                        { x: 2200, y: 2200, location: 'pennyworth_lane', npcs: ['old_willy'] },
+                        { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+                    ],
+                    efficiencyScore: 92
+                },
+                balanced: {
+                    id: 'balanced',
+                    name: 'Route 2: The Balanced',
+                    waypoints: [
+                        { x: 1100, y: 1100, location: 'police_station', action: 'start' },
+                        { x: 1152, y: 1120, location: 'police_station', action: 'collect_evidence', clueId: 'desk_receipt' },
+                        { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland'] },
+                        { x: 2200, y: 2200, location: 'pennyworth_lane', npcs: ['old_willy', 'mary_henshaw'] },
+                        { x: 1800, y: 2600, location: 'woods_edge', npcs: ['aaron_kosminski'], optional: true },
+                        { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+                    ],
+                    efficiencyScore: 78
+                },
+                resourceHeavy: {
+                    id: 'resource_heavy',
+                    name: 'Route 3: The Safe/Resource-Heavy',
+                    waypoints: [
+                        { x: 1100, y: 1100, location: 'police_station', npcs: ['edwin_clarke', 'arthur_kosminski', 'mr_ashcombe'] },
+                        { x: 1152, y: 1120, location: 'police_station', action: 'collect_evidence' },
+                        { x: 1600, y: 1600, location: 'school', npcs: ['mr_finch', 'headmaster_whitcombe', 'evie_moreland', 'samuel_atwell', 'beatrice_holloway', 'clara_redford', 'james_calder', 'mrs_loxley'] },
+                        { x: 2200, y: 2400, location: 'pennyworth_lane', npcs: ['old_willy', 'mary_henshaw', 'mr_cobb'] },
+                        { x: 2400, y: 2800, location: 'harrow_residence', npcs: ['mr_harrow', 'mrs_harrow', 'peter_harrow'] },
+                        { x: 3000, y: 2200, location: 'risky_passage', npcs: ['ada_merriweather'] },
+                        { x: 3200, y: 2400, location: 'lions_den', action: 'reconnaissance' },
+                        { x: 1100, y: 1100, location: 'police_station', action: 'return' }
+                    ],
+                    efficiencyScore: 55
+                }
+            },
+
+            selectRoute(routeId) {
+                this.currentRoute = this.routes[routeId];
+                this.currentWaypointIndex = 0;
+                if (this.currentRoute) {
+                    console.log(`✅ Route selected: ${this.currentRoute.name} (Efficiency: ${this.currentRoute.efficiencyScore}/100)`);
+                }
+            },
+
+            getCurrentWaypoint() {
+                if (!this.currentRoute || !this.currentRoute.waypoints) return null;
+                return this.currentRoute.waypoints[this.currentWaypointIndex] || null;
+            },
+
+            advanceWaypoint() {
+                if (!this.currentRoute) return false;
+                if (this.currentWaypointIndex < this.currentRoute.waypoints.length - 1) {
+                    this.currentWaypointIndex++;
+                    return true;
+                }
+                return false;
+            }
+        };
+
+        // Initialize route system (default to balanced route per PATHFINDING_ANALYSIS.md recommendation)
+        this.routeSystem.selectRoute('balanced');
 
 
 
@@ -1266,11 +1543,61 @@ export default class GameScene extends Phaser.Scene {
         };
         this.input.keyboard.on("keydown-F8", this.f8Handler);
 
+        // F11: Boundary Painter Tool - Right-click to toggle collision state
+        this.boundaryPainterActive = false;
+        this.boundaryPainterGraphics = null;
+        this.boundaryPainterUI = null;
+        this.f11Handler = () => {
+            this.boundaryPainterActive = !this.boundaryPainterActive;
+            if (this.boundaryPainterActive) {
+                this.showBoundaryPainter();
+                console.log("🎨 F11: Boundary Painter ON - Right-click to toggle collision (Red=solid, Green=walkable)");
+            } else {
+                this.hideBoundaryPainter();
+                console.log("🎨 F11: Boundary Painter OFF");
+            }
+        };
+        this.input.keyboard.on("keydown-F11", this.f11Handler);
+        
+        // Right-click handler for boundary painting
+        this.input.on('pointerdown', (pointer, gameObjects) => {
+            if (this.boundaryPainterActive && pointer.button === 2) { // Right mouse button
+                this.paintBoundaryCell(pointer.worldX, pointer.worldY);
+            }
+        });
+
         if (debugData) {
             this.mapDebugOverlay = new MapDebugOverlay(this, debugData);
         }
         console.log("🗺️ Debug overlay ready: press F2 to toggle collision visualization");
         console.log("🔍 Collision audit: press F8 to run manually (also runs automatically after NPC spawn)");
+        console.log("🎨 Boundary Painter: press F11 to toggle - Right-click to paint collision cells (Red=solid, Green=walkable)");
+        
+        // --- AUTOMATIC GLOBAL BOUNDARY SHRINK ---
+        // Automatically execute Global Boundary Shrink after map initialization completes
+        // This runs asynchronously in the background to avoid blocking game startup
+        setTimeout(() => {
+            if (this.map && this.mapW && this.mapH && this.subGridCollisionData !== undefined) {
+                console.log("🔧 Starting automatic Global Boundary Shrink...");
+                this.executeGlobalShrink({
+                    alphaThreshold: 128,
+                    minConsecutivePixels: 4,
+                    onProgress: (processed, total) => {
+                        if (processed % 1000 === 0 || processed === total) {
+                            const progress = (processed / total * 100).toFixed(1);
+                            console.log(`🔧 Global Boundary Shrink: ${progress}% (${processed}/${total} tiles)`);
+                        }
+                    }
+                }).then(stats => {
+                    console.log('✅ Global Boundary Shrink complete!', stats);
+                    console.log(`   ${stats.tilesShrunk} tiles shrunk (boundaries tightened)`);
+                    console.log(`   ${stats.tilesUnchanged} tiles unchanged`);
+                    console.log(`   Elapsed time: ${stats.elapsedTime}`);
+                }).catch(err => {
+                    console.error('❌ Global Boundary Shrink failed:', err);
+                });
+            }
+        }, 1000); // Wait 1 second for map to fully initialize
     }
 
     /**
@@ -1419,14 +1746,19 @@ export default class GameScene extends Phaser.Scene {
         // Set depth for Y-sorting (feet position)
         sprite.setDepth(Math.floor(sprite.y));
 
-        // Return debug info
+        // Return debug info (including body dimensions for sprite audit)
         return {
             key: sprite.texture?.key || 'unknown',
             frameW,
             frameH,
             scale: scale.toFixed(3),
             displayW: sprite.displayWidth.toFixed(1),
-            displayH: sprite.displayHeight.toFixed(1)
+            displayH: sprite.displayHeight.toFixed(1),
+            bodyW: sprite.body ? sprite.body.width.toFixed(1) : 'N/A',
+            bodyH: sprite.body ? sprite.body.height.toFixed(1) : 'N/A',
+            bodyOffsetX: sprite.body ? sprite.body.offset.x.toFixed(1) : 'N/A',
+            bodyOffsetY: sprite.body ? sprite.body.offset.y.toFixed(1) : 'N/A',
+            origin: `(${sprite.originX.toFixed(2)}, ${sprite.originY.toFixed(2)})`
         };
     }
 
@@ -1542,6 +1874,909 @@ export default class GameScene extends Phaser.Scene {
             this.collisionDebugGraphics.clear();
             this.collisionDebugGraphics.visible = false;
         }
+    }
+
+    /**
+     * Helper: Get sub-grid cell index from world coordinates
+     * @param {number} worldX - World X coordinate
+     * @param {number} worldY - World Y coordinate
+     * @param {number} tx - Tile X coordinate
+     * @param {number} ty - Tile Y coordinate
+     * @returns {number} Sub-grid cell index (0-15)
+     */
+    getSubGridCellIndex(worldX, worldY, tx, ty) {
+        const tw = this.mapTileWidth || 32;
+        const th = this.mapTileHeight || 32;
+        const subGridSize = GameScene.SUB_GRID_SIZE;
+        const subX = Math.floor((worldX - (tx * tw)) / subGridSize);
+        const subY = Math.floor((worldY - (ty * th)) / subGridSize);
+        return Math.max(0, Math.min(15, subY * 4 + subX)); // Clamp to 0-15
+    }
+
+    /**
+     * Helper: Get or set sub-grid bitmask for a tile
+     * @param {number} tx - Tile X coordinate
+     * @param {number} ty - Tile Y coordinate
+     * @param {number} cellIndex - Sub-grid cell index (0-15) to toggle, or null to get mask
+     * @returns {number} Bitmask value (0x0000-0xFFFF)
+     */
+    getSubGridMask(tx, ty, cellIndex = null) {
+        const tileKey = `${tx},${ty}`;
+        const entry = this.subGridCollisionData?.[tileKey];
+        
+        // Handle both formats: number (legacy) or object { mask, alpha_threshold_passed }
+        let mask = 0x0000;
+        if (entry !== undefined) {
+            if (typeof entry === 'number') {
+                mask = entry;
+            } else if (entry && typeof entry === 'object' && 'mask' in entry) {
+                mask = entry.mask;
+            }
+        }
+        
+        if (cellIndex !== null) {
+            // Toggle the bit for this cell
+            mask ^= (1 << cellIndex);
+            // Update collision data (always use new format with alpha_threshold_passed)
+            if (!this.subGridCollisionData) this.subGridCollisionData = {};
+            this.subGridCollisionData[tileKey] = {
+                mask: mask,
+                alpha_threshold_passed: true
+            };
+        }
+        
+        return mask;
+    }
+
+    /**
+     * Helper: Check if a sub-grid cell is walkable
+     * @param {number} mask - Bitmask value
+     * @param {number} cellIndex - Sub-grid cell index (0-15)
+     * @returns {boolean} True if walkable (bit = 0)
+     */
+    isSubCellWalkable(mask, cellIndex) {
+        return !(mask & (1 << cellIndex));
+    }
+
+    /**
+     * Helper: Get raw pixel color and alpha from texture at coordinates
+     * @param {string} textureKey - Texture key
+     * @param {number} x - X coordinate in texture
+     * @param {number} y - Y coordinate in texture
+     * @returns {Object} {hex: "#RRGGBB", alpha: 0-255, rgba: [r, g, b, a]}
+     */
+    getRawPixelColor(textureKey, x, y) {
+        try {
+            const texture = this.textures.get(textureKey);
+            if (!texture) return { hex: '#000000', alpha: 255, rgba: [0, 0, 0, 255] };
+            
+            // Get texture source image
+            const source = texture.source[0];
+            if (!source || !source.image) return { hex: '#000000', alpha: 255, rgba: [0, 0, 0, 255] };
+            
+            // Create canvas to read pixel data
+            const canvas = document.createElement('canvas');
+            canvas.width = source.width;
+            canvas.height = source.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(source.image, 0, 0);
+            
+            // Get pixel data
+            const imageData = ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1);
+            const [r, g, b, a] = imageData.data;
+            
+            // Convert to hex
+            const hex = `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+            
+            return { hex, alpha: a, rgba: [r, g, b, a] };
+        } catch (e) {
+            console.warn('Failed to get raw pixel color:', e);
+            return { hex: '#000000', alpha: 255, rgba: [0, 0, 0, 255] };
+        }
+    }
+
+    /**
+     * Check if an 8px sub-cell has at least 4 consecutive opaque pixels
+     * Uses flood-fill to find connected components of opaque pixels
+     * @param {Array<Array<number>>} pixelGrid - 8x8 grid of alpha values (0-255)
+     * @param {number} alphaThreshold - Alpha threshold (default: 128)
+     * @returns {boolean} True if largest cluster has >= 4 pixels
+     */
+    hasConsecutiveOpaquePixels(pixelGrid, alphaThreshold = 128) {
+        const size = 8;
+        const visited = Array(size).fill(null).map(() => Array(size).fill(false));
+        let maxClusterSize = 0;
+        
+        // Flood-fill to find connected components
+        const floodFill = (startX, startY) => {
+            if (startX < 0 || startX >= size || startY < 0 || startY >= size) return 0;
+            if (visited[startY][startX]) return 0;
+            if (pixelGrid[startY][startX] < alphaThreshold) return 0; // Not opaque
+            
+            visited[startY][startX] = true;
+            let clusterSize = 1;
+            
+            // Check 4-connected neighbors (up, down, left, right)
+            const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+            for (const [dx, dy] of directions) {
+                clusterSize += floodFill(startX + dx, startY + dy);
+            }
+            
+            return clusterSize;
+        };
+        
+        // Find all clusters
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                if (!visited[y][x] && pixelGrid[y][x] >= alphaThreshold) {
+                    const clusterSize = floodFill(x, y);
+                    maxClusterSize = Math.max(maxClusterSize, clusterSize);
+                }
+            }
+        }
+        
+        // Cell is solid only if largest cluster has >= 4 pixels
+        return maxClusterSize >= 4;
+    }
+
+    /**
+     * Calculate bounding box of non-transparent pixels within an 8px sub-cell
+     * @param {Array<Array<number>>} pixelGrid - 8x8 grid of alpha values (0-255)
+     * @param {number} alphaThreshold - Alpha threshold (default: 128)
+     * @returns {Object} {minX, minY, maxX, maxY, pixelCount} or null if no opaque pixels
+     */
+    calculateOpaqueBoundingBox(pixelGrid, alphaThreshold = 128) {
+        const size = 8;
+        let minX = size, minY = size, maxX = -1, maxY = -1;
+        let pixelCount = 0;
+        
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                if (pixelGrid[y][x] >= alphaThreshold) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                    pixelCount++;
+                }
+            }
+        }
+        
+        if (pixelCount === 0) return null;
+        
+        return { minX, minY, maxX, maxY, pixelCount };
+    }
+
+    /**
+     * Silhouette-Based Collision: Scan alpha channel for 8px sub-cell with consecutive pixel check
+     * Uses alpha channel to determine if sub-cell is walkable
+     * A cell is only solid if it contains at least 4 consecutive opaque pixels
+     * @param {number} tx - Tile X coordinate
+     * @param {number} ty - Tile Y coordinate
+     * @param {number} subCellIndex - Sub-grid cell index (0-15)
+     * @param {boolean} requireConsecutive - If true, requires 4+ consecutive pixels (default: true)
+     * @returns {boolean} True if walkable
+     */
+    scanSubCellAlpha(tx, ty, subCellIndex, requireConsecutive = true) {
+        const tw = this.mapTileWidth || 32;
+        const th = this.mapTileHeight || 32;
+        const subGridSize = GameScene.SUB_GRID_SIZE;
+        const alphaThreshold = 128; // 50% transparent threshold
+        
+        // Calculate sub-cell position within tile
+        const subX = subCellIndex % 4;
+        const subY = Math.floor(subCellIndex / 4);
+        const cellStartX = subX * subGridSize;
+        const cellStartY = subY * subGridSize;
+        
+        // Build 8x8 pixel grid of alpha values
+        const pixelGrid = Array(subGridSize).fill(null).map(() => Array(subGridSize).fill(0));
+        
+        // Check all visual layers for this tile (from bottom to top)
+        const layerNames = Object.keys(this.layers).reverse();
+        
+        for (const layerName of layerNames) {
+            const layer = this.layers[layerName];
+            if (!layer || layer.type !== 'tilelayer') continue;
+            
+            // Skip shadow layers (they don't affect collision)
+            if (this.shadowLayers && this.shadowLayers.includes(layerName)) continue;
+            
+            const tile = layer.getTileAt(tx, ty);
+            if (!tile || tile.index === -1) continue;
+            
+            // Get tileset and texture info
+            const tileset = this.map.tilesets.find(ts => {
+                const firstGid = ts.firstgid || 0;
+                return tile.index >= firstGid && tile.index < firstGid + (ts.tilecount || 0);
+            });
+            
+            if (!tileset) continue;
+            
+            // Calculate local tile ID within tileset
+            const localTileId = tile.index - (tileset.firstgid || 0);
+            const tilesPerRow = Math.floor(tileset.imagewidth / tileset.tilewidth);
+            const tileXInTileset = localTileId % tilesPerRow;
+            const tileYInTileset = Math.floor(localTileId / tilesPerRow);
+            
+            // Get texture key
+            const textureKey = tileset.name;
+            const texture = this.textures.get(textureKey);
+            if (!texture) continue;
+            
+            // Sample all pixels in the 8px sub-cell
+            for (let py = 0; py < subGridSize; py++) {
+                for (let px = 0; px < subGridSize; px++) {
+                    // Calculate texture coordinates
+                    const textureX = (tileXInTileset * tileset.tilewidth) + cellStartX + px;
+                    const textureY = (tileYInTileset * tileset.tileheight) + cellStartY + py;
+                    
+                    // Bounds check
+                    if (textureX < 0 || textureY < 0 || textureX >= tileset.imagewidth || textureY >= tileset.imageheight) {
+                        continue;
+                    }
+                    
+                    // Get pixel alpha (use maximum alpha from all layers)
+                    const pixelData = this.getRawPixelColor(textureKey, textureX, textureY);
+                    pixelGrid[py][px] = Math.max(pixelGrid[py][px], pixelData.alpha);
+                }
+            }
+        }
+        
+        // If no pixels found in any layer, check blocked tiles as fallback
+        const hasAnyPixels = pixelGrid.some(row => row.some(alpha => alpha > 0));
+        if (!hasAnyPixels) {
+            const idx = ty * (this.mapW || 128) + tx;
+            return this.blockedTiles?.[idx] !== 1; // Walkable if not blocked
+        }
+        
+        // Global Boundary Shrink: Check for consecutive opaque pixels
+        if (requireConsecutive) {
+            // Cell is solid only if it has at least 4 consecutive opaque pixels
+            const hasConsecutive = this.hasConsecutiveOpaquePixels(pixelGrid, alphaThreshold);
+            return !hasConsecutive; // Walkable if no consecutive cluster found
+        } else {
+            // Fallback: percentage-based check
+            let opaqueCount = 0;
+            let totalPixels = 0;
+            for (let y = 0; y < subGridSize; y++) {
+                for (let x = 0; x < subGridSize; x++) {
+                    if (pixelGrid[y][x] >= alphaThreshold) {
+                        opaqueCount++;
+                    }
+                    totalPixels++;
+                }
+            }
+            const opaquePercentage = opaqueCount / totalPixels;
+            return opaquePercentage < 0.5; // Walkable if <50% opaque
+        }
+    }
+
+    /**
+     * Generate collision bitmask for a tile using silhouette-based collision
+     * Uses Global Boundary Shrink: only marks cells solid if they have 4+ consecutive opaque pixels
+     * @param {number} tx - Tile X coordinate
+     * @param {number} ty - Tile Y coordinate
+     * @param {boolean} useShrink - Use Global Boundary Shrink logic (default: true)
+     * @returns {number} Bitmask value (0x0000-0xFFFF)
+     */
+    generateSilhouetteCollisionMask(tx, ty, useShrink = true) {
+        let mask = 0x0000;
+        
+        // Scan each sub-cell
+        for (let cellIndex = 0; cellIndex < 16; cellIndex++) {
+            const isWalkable = this.scanSubCellAlpha(tx, ty, cellIndex, useShrink);
+            
+            if (!isWalkable) {
+                // Set bit to 1 (solid) if not walkable
+                mask |= (1 << cellIndex);
+            }
+            // Bit remains 0 (walkable) if transparent or insufficient consecutive pixels
+        }
+        
+        return mask;
+    }
+
+    /**
+     * GLOBAL BOUNDARY SHRINK: Execute batch processing to tighten all collisions
+     * Processes all tiles marked as "Red" (boundary) in collision_map.json
+     * Applies alpha thresholding (<128 = non-collidable) and consecutive pixel requirement (4+)
+     * 
+     * REASONING (Chain-of-Thought):
+     * STEP 1: Fetch raw sprite data using getRawPixelColor logic
+     * STEP 2: Calculate bounding box of non-transparent pixels within each 8px cell
+     * STEP 3: If visual edge only occupies 2px of an 8px cell, mark as walkable
+     * STEP 4: Update collision_map.json with tighter bitmasks
+     * 
+     * EXECUTION (ReAct):
+     * THOUGHT: By shrinking boundary to visible silhouette, eliminate 'invisible box' effect
+     * ACTION: Agent 3 performs pixel-scan; Agent 1 commits updated bitmasks to JSON
+     * VERIFICATION: Use F11 Inspector to verify Green navigable areas follow exact curve/angle
+     * 
+     * @param {Object} options - Configuration options
+     * @param {number} options.alphaThreshold - Alpha threshold (default: 128)
+     * @param {number} options.minConsecutivePixels - Minimum consecutive pixels required (default: 4)
+     * @param {Function} options.onProgress - Progress callback (tilesProcessed, totalTiles)
+     * @returns {Promise<Object>} Statistics about the shrink operation
+     */
+    async executeGlobalShrink(options = {}) {
+        const {
+            alphaThreshold = 128,
+            minConsecutivePixels = 4,
+            onProgress = null
+        } = options;
+
+        console.log('🔍 GLOBAL BOUNDARY SHRINK: Starting batch processing...');
+        console.log(`   Alpha Threshold: ${alphaThreshold} (<${alphaThreshold} = non-collidable)`);
+        console.log(`   Min Consecutive Pixels: ${minConsecutivePixels}`);
+
+        if (!this.map || !this.mapW || !this.mapH) {
+            console.error('❌ Map not initialized');
+            return { success: false, error: 'Map not initialized' };
+        }
+
+        const mapW = this.mapW || 128;
+        const mapH = this.mapH || 128;
+        const totalTiles = mapW * mapH;
+        
+        if (!this.subGridCollisionData) {
+            this.subGridCollisionData = {};
+        }
+
+        let tilesProcessed = 0;
+        let tilesShrunk = 0;
+        let tilesUnchanged = 0;
+        let tilesExpanded = 0;
+        const startTime = Date.now();
+
+        // STEP 1: Iterate through all tiles
+        for (let ty = 0; ty < mapH; ty++) {
+            for (let tx = 0; tx < mapW; tx++) {
+                const tileKey = `${tx},${ty}`;
+                const oldMask = this.subGridCollisionData[tileKey] || 0x0000;
+                
+                // Check if tile is marked as "Red" (boundary) - has any solid cells
+                const isBoundaryTile = oldMask !== 0x0000;
+                
+                // STEP 2: Generate new mask using Global Boundary Shrink logic
+                const newMask = this.generateSilhouetteCollisionMask(tx, ty, true);
+                
+                // STEP 3: Compare masks to track changes
+                if (newMask !== oldMask) {
+                    if (isBoundaryTile) {
+                        // Count solid cells before and after
+                        const oldSolidCount = this.countSolidCells(oldMask);
+                        const newSolidCount = this.countSolidCells(newMask);
+                        
+                        if (newSolidCount < oldSolidCount) {
+                            tilesShrunk++;
+                        } else if (newSolidCount > oldSolidCount) {
+                            tilesExpanded++;
+                        }
+                    }
+                    
+                    // Update collision data
+                    this.subGridCollisionData[tileKey] = newMask;
+                } else {
+                    tilesUnchanged++;
+                }
+                
+                tilesProcessed++;
+                
+                // Progress reporting
+                if (tilesProcessed % 100 === 0 || tilesProcessed === totalTiles) {
+                    const progress = (tilesProcessed / totalTiles * 100).toFixed(1);
+                    console.log(`   Progress: ${progress}% (${tilesProcessed}/${totalTiles} tiles)`);
+                    if (onProgress) {
+                        onProgress(tilesProcessed, totalTiles);
+                    }
+                }
+            }
+        }
+
+        const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        const stats = {
+            success: true,
+            totalTiles,
+            tilesProcessed,
+            tilesShrunk,
+            tilesUnchanged,
+            tilesExpanded,
+            elapsedTime: `${elapsedTime}s`,
+            alphaThreshold,
+            minConsecutivePixels
+        };
+
+        console.log('✅ GLOBAL BOUNDARY SHRINK: Complete!');
+        console.log(`   Tiles Processed: ${tilesProcessed}`);
+        console.log(`   Tiles Shrunk: ${tilesShrunk} (boundaries tightened)`);
+        console.log(`   Tiles Unchanged: ${tilesUnchanged}`);
+        console.log(`   Tiles Expanded: ${tilesExpanded}`);
+        console.log(`   Elapsed Time: ${elapsedTime}s`);
+
+        // STEP 4: Save updated collision_map.json
+        await this.saveCollisionMap();
+
+        // Update display if boundary painter is active
+        if (this.boundaryPainterActive) {
+            this.updateBoundaryPainterDisplay();
+        }
+
+        return stats;
+    }
+
+    /**
+     * Helper: Count number of solid cells in a bitmask
+     * @param {number} mask - Bitmask value (0x0000-0xFFFF)
+     * @returns {number} Number of solid cells (0-16)
+     */
+    countSolidCells(mask) {
+        let count = 0;
+        for (let i = 0; i < 16; i++) {
+            if (mask & (1 << i)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Apply silhouette-based collision to a region of tiles
+     * @param {number} startX - Start tile X
+     * @param {number} startY - Start tile Y
+     * @param {number} width - Width in tiles
+     * @param {number} height - Height in tiles
+     * @param {boolean} updateDisplay - Whether to update visual display
+     */
+    applySilhouetteCollision(startX, startY, width, height, updateDisplay = true) {
+        if (!this.subGridCollisionData) this.subGridCollisionData = {};
+        
+        let processedCount = 0;
+        for (let ty = startY; ty < startY + height; ty++) {
+            for (let tx = startX; tx < startX + width; tx++) {
+                const mask = this.generateSilhouetteCollisionMask(tx, ty);
+                const tileKey = `${tx},${ty}`;
+                this.subGridCollisionData[tileKey] = mask;
+                processedCount++;
+                
+                if (processedCount % 100 === 0) {
+                    console.log(`🔍 Silhouette scan: ${processedCount} tiles processed...`);
+                }
+            }
+        }
+        
+        console.log(`✅ Silhouette collision applied to ${processedCount} tiles`);
+        
+        // Save changes
+        this.saveCollisionMap();
+        
+        if (updateDisplay && this.boundaryPainterActive) {
+            this.updateBoundaryPainterDisplay();
+        }
+    }
+
+    /**
+     * F11 Boundary Painter Tool - Right-click to toggle collision state
+     * Now includes Silhouette-Based Collision scanning
+     */
+    showBoundaryPainter() {
+        if (!this.boundaryPainterGraphics) {
+            this.boundaryPainterGraphics = this.add.graphics();
+            this.boundaryPainterGraphics.setDepth(999998);
+            this.boundaryPainterGraphics.setScrollFactor(1);
+        }
+        
+        if (!this.boundaryPainterUI) {
+            this.boundaryPainterUI = this.add.container(0, 0);
+            this.boundaryPainterUI.setScrollFactor(0);
+            this.boundaryPainterUI.setDepth(999999);
+            
+            const bg = this.add.rectangle(0, 0, 400, 120, 0x000000, 0.8);
+            bg.setStrokeStyle(2, 0x00ff00);
+            bg.setScrollFactor(0);
+            this.boundaryPainterUI.add(bg);
+            
+            const text = this.add.text(0, 0, 'BOUNDARY PAINTER (F11)\nRight-Click: Toggle collision\n[S] Scan current tile\n[A] Scan visible area\nRed = Solid, Green = Walkable', {
+                fontFamily: 'Courier New',
+                fontSize: '11px',
+                color: '#00ff00',
+                align: 'center'
+            });
+            text.setOrigin(0.5);
+            text.setScrollFactor(0);
+            this.boundaryPainterUI.add(text);
+            
+            const { width } = this.scale;
+            this.boundaryPainterUI.setPosition(width / 2, 60);
+        }
+        
+        // Add keyboard handlers for silhouette scanning
+        if (!this.boundaryPainterKeyHandlers) {
+            this.boundaryPainterKeyHandlers = {
+                scanTile: this.input.keyboard.addKey('S'),
+                scanArea: this.input.keyboard.addKey('A')
+            };
+        }
+        
+        this.boundaryPainterGraphics.visible = true;
+        this.boundaryPainterUI.setVisible(true);
+        this.updateBoundaryPainterDisplay();
+    }
+
+    hideBoundaryPainter() {
+        if (this.boundaryPainterGraphics) {
+            this.boundaryPainterGraphics.visible = false;
+        }
+        if (this.boundaryPainterUI) {
+            this.boundaryPainterUI.setVisible(false);
+        }
+    }
+
+    /**
+     * Paint boundary cell - Toggle collision state for sub-grid cell
+     * @param {number} worldX - World X coordinate
+     * @param {number} worldY - World Y coordinate
+     */
+    paintBoundaryCell(worldX, worldY) {
+        if (!this.mapTileWidth || !this.mapTileHeight) return;
+        
+        const tw = this.mapTileWidth;
+        const th = this.mapTileHeight;
+        const tx = Math.floor(worldX / tw);
+        const ty = Math.floor(worldY / th);
+        
+        // Get sub-grid cell index
+        const cellIndex = this.getSubGridCellIndex(worldX, worldY, tx, ty);
+        
+        // Toggle collision state
+        const newMask = this.getSubGridMask(tx, ty, cellIndex);
+        const isWalkable = this.isSubCellWalkable(newMask, cellIndex);
+        
+        console.log(`🎨 Painted cell at tile (${tx},${ty}), sub-cell ${cellIndex}: ${isWalkable ? 'WALKABLE' : 'SOLID'} (mask: 0x${newMask.toString(16).padStart(4, '0')})`);
+        
+        // Save changes to collision_map.json
+        this.saveCollisionMap();
+        
+        // Update display
+        this.updateBoundaryPainterDisplay();
+    }
+
+    /**
+     * Update boundary painter display - Show sub-grid cells with colors
+     * Enhanced to show silhouette-based collision results with stepped boundaries
+     */
+    updateBoundaryPainterDisplay() {
+        if (!this.boundaryPainterActive || !this.boundaryPainterGraphics) return;
+        
+        this.boundaryPainterGraphics.clear();
+        
+        const pointer = this.input.activePointer;
+        const worldX = pointer.worldX;
+        const worldY = pointer.worldY;
+        
+        const tw = this.mapTileWidth || 32;
+        const th = this.mapTileHeight || 32;
+        const subGridSize = GameScene.SUB_GRID_SIZE;
+        const tx = Math.floor(worldX / tw);
+        const ty = Math.floor(worldY / th);
+        
+        // Check for silhouette scan key presses
+        if (this.boundaryPainterKeyHandlers) {
+            if (Phaser.Input.Keyboard.JustDown(this.boundaryPainterKeyHandlers.scanTile)) {
+                // Scan current tile
+                console.log(`🔍 Scanning silhouette for tile (${tx},${ty})...`);
+                const mask = this.generateSilhouetteCollisionMask(tx, ty);
+                const tileKey = `${tx},${ty}`;
+                if (!this.subGridCollisionData) this.subGridCollisionData = {};
+                this.subGridCollisionData[tileKey] = mask;
+                this.saveCollisionMap();
+                console.log(`✅ Tile (${tx},${ty}) mask: 0x${mask.toString(16).padStart(4, '0')}`);
+            }
+            
+            if (Phaser.Input.Keyboard.JustDown(this.boundaryPainterKeyHandlers.scanArea)) {
+                // Scan visible area (camera viewport)
+                const camera = this.cameras.main;
+                const startX = Math.max(0, Math.floor(camera.worldView.x / tw) - 2);
+                const startY = Math.max(0, Math.floor(camera.worldView.y / th) - 2);
+                const endX = Math.min(this.mapW || 128, Math.ceil((camera.worldView.x + camera.worldView.width) / tw) + 2);
+                const endY = Math.min(this.mapH || 128, Math.ceil((camera.worldView.y + camera.worldView.height) / th) + 2);
+                const width = endX - startX;
+                const height = endY - startY;
+                console.log(`🔍 Scanning silhouette for visible area (${startX},${startY}) to (${endX},${endY})...`);
+                this.applySilhouetteCollision(startX, startY, width, height, true);
+            }
+        }
+        
+        // Draw sub-grid cells for current tile and surrounding tiles (for stepped boundary visualization)
+        const drawRadius = 1; // Show 3x3 tiles for better context
+        
+        for (let offsetY = -drawRadius; offsetY <= drawRadius; offsetY++) {
+            for (let offsetX = -drawRadius; offsetX <= drawRadius; offsetX++) {
+                const drawTx = tx + offsetX;
+                const drawTy = ty + offsetY;
+                
+                // Bounds check
+                if (drawTx < 0 || drawTy < 0 || drawTx >= (this.mapW || 128) || drawTy >= (this.mapH || 128)) {
+                    continue;
+                }
+                
+                const tileKey = `${drawTx},${drawTy}`;
+                let mask = this.subGridCollisionData?.[tileKey];
+                
+                // If no mask exists, generate one using silhouette scanning
+                if (mask === undefined) {
+                    mask = this.generateSilhouetteCollisionMask(drawTx, drawTy);
+                    if (!this.subGridCollisionData) this.subGridCollisionData = {};
+                    this.subGridCollisionData[tileKey] = mask;
+                }
+                
+                // Draw sub-grid cells with stepped boundary visualization
+                for (let subY = 0; subY < 4; subY++) {
+                    for (let subX = 0; subX < 4; subX++) {
+                        const cellIndex = subY * 4 + subX;
+                        const isWalkable = this.isSubCellWalkable(mask, cellIndex);
+                        const cellX = (drawTx * tw) + (subX * subGridSize);
+                        const cellY = (drawTy * th) + (subY * subGridSize);
+                        
+                        // Draw cell: Green = walkable, Red = solid
+                        // Use higher opacity for center tile, lower for surrounding
+                        const alpha = (offsetX === 0 && offsetY === 0) ? 0.5 : 0.2;
+                        this.boundaryPainterGraphics.fillStyle(isWalkable ? 0x00ff00 : 0xff0000, alpha);
+                        this.boundaryPainterGraphics.fillRect(cellX, cellY, subGridSize, subGridSize);
+                        
+                        // Draw border only for center tile
+                        if (offsetX === 0 && offsetY === 0) {
+                            this.boundaryPainterGraphics.lineStyle(1, isWalkable ? 0x00ff00 : 0xff0000, 0.9);
+                            this.boundaryPainterGraphics.strokeRect(cellX, cellY, subGridSize, subGridSize);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Highlight current tile with a border
+        this.boundaryPainterGraphics.lineStyle(2, 0x00ffff, 1.0);
+        this.boundaryPainterGraphics.strokeRect(tx * tw, ty * th, tw, th);
+    }
+
+    /**
+     * Save collision map changes to JSON file (via Agent 1's system)
+     */
+    async saveCollisionMap() {
+        if (!this.subGridCollisionData) return;
+        
+        try {
+            const collisionMapData = {
+                _metadata: {
+                    version: "1.0",
+                    description: "8px sub-grid collision system for 32px tiles",
+                    mapDimensions: {
+                        width: this.mapW || 128,
+                        height: this.mapH || 128,
+                        tileSize: this.mapTileWidth || 32,
+                        subGridSize: GameScene.SUB_GRID_SIZE
+                    },
+                    format: {
+                        key: "tile coordinate as 'x,y' string (e.g., '0,0', '1,0')",
+                        value: "16-bit mask (0x0000-0xFFFF) representing 4x4 sub-grid collision",
+                        maskBits: "Each bit represents one 8px sub-cell: bit 0 = top-left, bit 15 = bottom-right",
+                        maskValues: {
+                            "0x0000": "Fully walkable (all 16 sub-cells walkable)",
+                            "0xFFFF": "Fully solid (all 16 sub-cells collidable)"
+                        }
+                    },
+                    sync: "This file is synced with COLOR_MANIFEST.js collision logic"
+                },
+                collisionData: this.subGridCollisionData
+            };
+            
+            // Send to Agent 1's system to save
+            const response = await fetch('/api/save-collision-map', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collisionMapData)
+            }).catch(() => {
+                // Fallback: Log to console if API not available
+                console.log('💾 Collision map changes (save via Agent 1):', JSON.stringify(collisionMapData, null, 2));
+            });
+            
+            if (response && response.ok) {
+                console.log('✅ Collision map saved successfully');
+            }
+        } catch (e) {
+            console.warn('⚠️ Failed to save collision map:', e);
+        }
+    }
+
+    /**
+     * F11 Tile Inspector Tool - Shows raw tile data and source hex colors (DEPRECATED - Use Boundary Painter)
+     * Queries COLOR_MANIFEST.js to display tile information
+     */
+    async showTileInspector() {
+        // Import COLOR_MANIFEST dynamically
+        let COLOR_MANIFEST;
+        try {
+            const manifestModule = await import('/public/assets/COLOR_MANIFEST.js');
+            COLOR_MANIFEST = manifestModule.COLOR_MANIFEST;
+        } catch (e) {
+            console.warn('COLOR_MANIFEST.js not found, using fallback:', e);
+            COLOR_MANIFEST = { tilesets: {}, tiles: {}, getTileColor: () => null, getTilesetColor: () => null };
+        }
+
+        // Create UI container
+        if (!this.tileInspectorUI) {
+            this.tileInspectorUI = {
+                container: this.add.container(0, 0),
+                bg: null,
+                text: null,
+                colorBox: null
+            };
+            this.tileInspectorUI.container.setScrollFactor(0);
+            this.tileInspectorUI.container.setDepth(999999);
+            this.tileInspectorUI.container.setVisible(false);
+
+            // Background panel
+            this.tileInspectorUI.bg = this.add.rectangle(0, 0, 400, 200, 0x000000, 0.9);
+            this.tileInspectorUI.bg.setStrokeStyle(2, 0xffffff);
+            this.tileInspectorUI.bg.setScrollFactor(0);
+            this.tileInspectorUI.container.add(this.tileInspectorUI.bg);
+
+            // Color preview box
+            this.tileInspectorUI.colorBox = this.add.rectangle(-150, 0, 60, 60, 0x808080);
+            this.tileInspectorUI.colorBox.setScrollFactor(0);
+            this.tileInspectorUI.container.add(this.tileInspectorUI.colorBox);
+
+            // Text display
+            this.tileInspectorUI.text = this.add.text(-100, -80, '', {
+                fontFamily: 'Courier New',
+                fontSize: '12px',
+                color: '#ffffff',
+                wordWrap: { width: 350 }
+            });
+            this.tileInspectorUI.text.setScrollFactor(0);
+            this.tileInspectorUI.container.add(this.tileInspectorUI.text);
+        }
+
+        this.tileInspectorUI.container.setVisible(true);
+        this.tileInspectorUI.COLOR_MANIFEST = COLOR_MANIFEST;
+    }
+
+    hideTileInspector() {
+        if (this.tileInspectorUI) {
+            this.tileInspectorUI.container.setVisible(false);
+        }
+    }
+
+    updateTileInspector() {
+        if (!this.tileInspectorActive || !this.tileInspectorUI || !this.tileInspectorUI.container.visible) {
+            return;
+        }
+
+        if (!this.map || !this.player) return;
+
+        const COLOR_MANIFEST = this.tileInspectorUI.COLOR_MANIFEST;
+        const pointer = this.input.activePointer;
+        const worldX = pointer.worldX;
+        const worldY = pointer.worldY;
+
+        // Convert world coordinates to tile coordinates
+        const tw = this.mapTileWidth || 32;
+        const th = this.mapTileHeight || 32;
+        const tx = Math.floor(worldX / tw);
+        const ty = Math.floor(worldY / th);
+
+        // Get tile data from all layers
+        let tileData = null;
+        let layerName = 'None';
+        let gid = 0;
+
+        // Check each layer for tile at this position
+        for (const layerNameKey in this.layers) {
+            const layer = this.layers[layerNameKey];
+            if (layer && layer.type === 'tilelayer') {
+                const tile = layer.getTileAt(tx, ty);
+                if (tile && tile.index !== -1) {
+                    tileData = tile;
+                    layerName = layerNameKey;
+                    gid = tile.index;
+                    break; // Use first non-empty tile found
+                }
+            }
+        }
+
+        // If no tile found, check blocked tiles
+        if (!tileData && this.blockedTiles && this.mapW) {
+            const idx = ty * this.mapW + tx;
+            if (idx >= 0 && idx < this.blockedTiles.length && this.blockedTiles[idx] === 1) {
+                tileData = { index: -1, blocked: true };
+                layerName = 'Blocked';
+            }
+        }
+
+        // Update UI
+        const screenX = pointer.x;
+        const screenY = pointer.y;
+        const { width, height } = this.scale;
+
+        // Position panel near pointer but keep it on screen
+        let panelX = screenX + 20;
+        let panelY = screenY - 100;
+        if (panelX + 200 > width) panelX = screenX - 420;
+        if (panelY + 200 > height) panelY = height - 220;
+        if (panelX < 0) panelX = 20;
+        if (panelY < 0) panelY = 20;
+
+        this.tileInspectorUI.container.setPosition(panelX, panelY);
+
+        // Build info text
+        let infoText = `TILE INSPECTOR (F11)\n`;
+        infoText += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        infoText += `World: (${Math.round(worldX)}, ${Math.round(worldY)})\n`;
+        infoText += `Tile: (${tx}, ${ty})\n`;
+        infoText += `Layer: ${layerName}\n`;
+
+        if (tileData) {
+            if (tileData.blocked) {
+                infoText += `Status: BLOCKED\n`;
+                infoText += `Color: #FF0000 (Red - Collision)\n`;
+                this.tileInspectorUI.colorBox.setFillStyle(0xFF0000);
+            } else {
+                infoText += `GID: ${gid}\n`;
+                
+                // Get color from COLOR_MANIFEST
+                const colorData = COLOR_MANIFEST.getTileColor(gid);
+                if (colorData) {
+                    infoText += `Hex: ${colorData.hex}\n`;
+                    infoText += `Tileset: ${colorData.tileset || 'Unknown'}\n`;
+                    if (colorData.properties) {
+                        infoText += `Properties: ${JSON.stringify(colorData.properties)}\n`;
+                    }
+                    const hexInt = parseInt(colorData.hex.replace('#', ''), 16);
+                    this.tileInspectorUI.colorBox.setFillStyle(hexInt);
+                } else {
+                    // Try to get tileset color
+                    const tileset = this.map.tilesets.find(ts => {
+                        const firstGid = ts.firstgid || 0;
+                        return gid >= firstGid && gid < firstGid + (ts.tilecount || 0);
+                    });
+                    if (tileset) {
+                        const tilesetColor = COLOR_MANIFEST.getTilesetColor(tileset.name);
+                        if (tilesetColor) {
+                            infoText += `Tileset: ${tilesetColor.name}\n`;
+                            infoText += `Color: ${tilesetColor.primaryColor}\n`;
+                            const hexInt = parseInt(tilesetColor.primaryColor.replace('#', ''), 16);
+                            this.tileInspectorUI.colorBox.setFillStyle(hexInt);
+                        } else {
+                            infoText += `Tileset: ${tileset.name}\n`;
+                            infoText += `Color: Unknown\n`;
+                            this.tileInspectorUI.colorBox.setFillStyle(0x808080);
+                        }
+                    } else {
+                        infoText += `Tileset: Unknown\n`;
+                        infoText += `Color: Unknown\n`;
+                        this.tileInspectorUI.colorBox.setFillStyle(0x808080);
+                    }
+                }
+
+                // Show tile properties if available
+                if (tileData.properties) {
+                    const props = Object.keys(tileData.properties);
+                    if (props.length > 0) {
+                        infoText += `\nProperties:\n`;
+                        props.forEach(prop => {
+                            infoText += `  ${prop}: ${tileData.properties[prop]}\n`;
+                        });
+                    }
+                }
+            }
+        } else {
+            infoText += `Status: Empty\n`;
+            infoText += `Color: N/A\n`;
+            this.tileInspectorUI.colorBox.setFillStyle(0x404040);
+        }
+
+        this.tileInspectorUI.text.setText(infoText);
     }
 
     shutdown() {
@@ -1780,7 +3015,19 @@ export default class GameScene extends Phaser.Scene {
                     }
                 }
 
-                const npc = this.physics.add.sprite(spawnData.x, spawnData.y, npcKey);
+                const npcData = getNPCById(spawnData.npcType || 'npc_1');
+                let npc;
+                if (npcData) {
+                    // Use NPC class for named characters (handles billboards)
+                    // Ensure we pass the resolved npcKey as spriteKey override if needed, 
+                    // but NPC class uses data.spriteKey. 
+                    // effectiveSpriteKey overrides data.spriteKey?
+                    // Let's assume NPC_DATA has correct spriteKey.
+                    npc = new NPC(this, spawnData.x, spawnData.y, npcData);
+                    this.add.existing(npc);
+                } else {
+                    npc = this.physics.add.sprite(spawnData.x, spawnData.y, npcKey);
+                }
 
                 // Normalize NPC sprite to consistent size (same as player)
                 const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
@@ -1932,7 +3179,17 @@ export default class GameScene extends Phaser.Scene {
             }
 
             // Create NPC sprite
-            const npc = this.physics.add.sprite(sx, sy, npcKey);
+            // Create NPC sprite
+            const npcId = obj.name || obj.type;
+            const npcData = getNPCById(npcId); // Check specific ID first
+
+            let npc;
+            if (npcData) {
+                npc = new NPC(this, sx, sy, npcData);
+                this.add.existing(npc);
+            } else {
+                npc = this.physics.add.sprite(sx, sy, npcKey);
+            }
 
             // STEP 2: Normalize NPC sprite to consistent size (same as player)
             const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
@@ -1990,6 +3247,131 @@ export default class GameScene extends Phaser.Scene {
         if (typeof spawnCorrections !== 'undefined' && spawnCorrections > 0) {
             console.log(`   Spawn corrections: ${spawnCorrections} NPCs moved to valid positions`);
         }
+    }
+
+    /**
+     * Create fallback HTML overlay for interaction prompt
+     * Used if Phaser text rendering fails or is covered by other layers
+     */
+    createFallbackInteractionPrompt() {
+        // Remove existing fallback if it exists
+        const existingFallback = document.getElementById('fallback-interaction-prompt');
+        if (existingFallback) {
+            existingFallback.remove();
+        }
+
+        // Create HTML overlay element
+        const fallbackPrompt = document.createElement('div');
+        fallbackPrompt.id = 'fallback-interaction-prompt';
+        fallbackPrompt.style.cssText = `
+            position: fixed;
+            top: 130px;
+            left: 16px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;
+            color: #ffffff;
+            background-color: #000000;
+            padding: 6px 10px;
+            border: 2px solid #b4945a;
+            z-index: 10003;
+            display: none;
+            pointer-events: none;
+        `;
+        fallbackPrompt.textContent = 'Press [E] to interact';
+        document.body.appendChild(fallbackPrompt);
+        this.fallbackPrompt = fallbackPrompt;
+    }
+
+    /**
+     * Update fallback HTML prompt (called from update loop)
+     */
+    updateFallbackPrompt(message, visible) {
+        if (this.fallbackPrompt) {
+            this.fallbackPrompt.textContent = message || 'Press [E] to interact';
+            this.fallbackPrompt.style.display = visible ? 'block' : 'none';
+        }
+    }
+
+    /**
+     * Spawn quest items from quest_items.js registry
+     * Creates interactable zones at coordinates defined in PATHFINDING_ANALYSIS.md
+     */
+    spawnQuestItems() {
+        if (!this.interactables) {
+            console.warn('Game.spawnQuestItems: interactables group not initialized');
+            return;
+        }
+
+        const questItemLocations = getAllQuestItemLocations();
+        console.log(`Game.spawnQuestItems: Spawning ${questItemLocations.length} quest items...`);
+
+        questItemLocations.forEach(itemData => {
+            const questItem = QUEST_ITEMS[itemData.id];
+            if (!questItem) {
+                console.warn(`Quest item ${itemData.id} not found in QUEST_ITEMS registry`);
+                return;
+            }
+
+            // Create interactable zone (32x32px interaction area)
+            const zone = this.physics.add.zone(itemData.x, itemData.y, 32, 32);
+            zone.setData('kind', 'quest_item');
+            zone.setData('id', questItem.id);
+            zone.setData('title', questItem.name);
+            zone.setData('description', questItem.description);
+            zone.setData('metadata', {
+                questPath: questItem.questPath,
+                questObjective: questItem.questObjective,
+                hexColor: questItem.hexColor
+            });
+
+            // Visual indicator (temporary - replace with sprite when available)
+            // Use quest item's hex color for visual consistency
+            const hexColor = questItem.hexColor || '#ff0000';
+            const colorInt = parseInt(hexColor.replace('#', ''), 16);
+            
+            // Try to load sprite first, fallback to circle indicator
+            let indicator;
+            if (this.textures.exists(questItem.spriteKey)) {
+                // Sprite exists - use it
+                indicator = this.add.image(itemData.x, itemData.y, questItem.spriteKey);
+                // Scale to match detective sprite (normalized to tileH * 1.75)
+                const tileH = this.mapTileHeight || 32;
+                const targetHeight = tileH * 1.75; // Match detective normalization
+                const spriteHeight = indicator.height || 32;
+                const scale = targetHeight / spriteHeight;
+                indicator.setScale(scale);
+                indicator.setVisible(true);
+                indicator.setAlpha(1);
+            } else {
+                // Fallback: use colored circle indicator
+                indicator = this.add.circle(itemData.x, itemData.y, 8, colorInt, 0.8);
+                indicator.setStrokeStyle(2, colorInt, 1.0);
+            }
+            
+            // CRITICAL: Force visibility and alpha (fixes missing/invisible items)
+            indicator.setVisible(true);
+            indicator.setAlpha(1);
+            indicator.setDepth(50);
+            
+            // Store reference to indicator for cleanup on collection
+            zone.setData('indicator', indicator);
+
+            // Add pulsing animation for visibility
+            this.tweens.add({
+                targets: indicator,
+                scaleX: indicator.scaleX * 1.2,
+                scaleY: indicator.scaleY * 1.2,
+                duration: 1000,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+
+            this.interactables.add(zone);
+            console.log(`  ✓ Spawned quest item: ${questItem.name} at [${itemData.x}, ${itemData.y}]`);
+        });
+
+        console.log(`Game.spawnQuestItems: Successfully spawned ${questItemLocations.length} quest items.`);
     }
 
     findSpawnPositionWithSpacing(startTx, startTy, existingPositions, minDistance) {
@@ -2208,19 +3590,48 @@ export default class GameScene extends Phaser.Scene {
         this.navCircle.x = this.player.x;
         this.navCircle.y = this.player.y;
 
-        // Arrow rotates towards target
-        const angle = Phaser.Math.Angle.Between(
+        const dist = Phaser.Math.Distance.Between(
             this.player.x,
             this.player.y,
             this.currentQuestTarget.x,
             this.currentQuestTarget.y
         );
+        const CLOSE_RANGE = 200;
 
-        // Position arrow slightly away from player
-        const radius = 60; // Slightly further out to clear the feet circle
-        this.navArrow.x = this.player.x + Math.cos(angle) * radius;
-        this.navArrow.y = this.player.y + Math.sin(angle) * radius;
-        this.navArrow.setRotation(angle + Math.PI / 2); // Adjust for triangle orientation
+        if (dist <= CLOSE_RANGE) {
+            // "Here it is" mode: Arrow at target, pointing down
+            this.navArrow.x = this.currentQuestTarget.x;
+
+            // Bouncing animation (using scene time)
+            const time = this.time.now;
+            const bounce = Math.sin(time * 0.005) * 10; // +/- 10px
+            this.navArrow.y = this.currentQuestTarget.y - 50 + bounce; // Floating above target
+
+            // Point DOWN (180 degrees)
+            this.navArrow.setRotation(Math.PI);
+            this.navArrow.setScale(1.5);
+
+            // Pulse opacity for extra visibility
+            this.navArrow.alpha = 0.8 + Math.sin(time * 0.01) * 0.2;
+        } else {
+            // "Guidance" mode: Orbiting player
+            this.navArrow.setScale(1.0);
+            this.navArrow.alpha = 1.0;
+
+            // Arrow rotates towards target
+            const angle = Phaser.Math.Angle.Between(
+                this.player.x,
+                this.player.y,
+                this.currentQuestTarget.x,
+                this.currentQuestTarget.y
+            );
+
+            // Position arrow slightly away from player
+            const radius = 60; // Slightly further out to clear the feet circle
+            this.navArrow.x = this.player.x + Math.cos(angle) * radius;
+            this.navArrow.y = this.player.y + Math.sin(angle) * radius;
+            this.navArrow.setRotation(angle + Math.PI / 2); // Adjust for triangle orientation
+        }
 
         // Update Minimap Quest Target
         if (this.minimap) {
@@ -2367,6 +3778,10 @@ export default class GameScene extends Phaser.Scene {
             // Update the new NPCController with real time (not 0)
             if (npc.controller) {
                 npc.controller.update(time, delta);
+            }
+            // Update billboard and other NPC visuals
+            if (npc.update && typeof npc.update === 'function') {
+                npc.update(this.player);
             }
 
             // Update depth for Y-sorting (feet position)
@@ -2552,6 +3967,11 @@ export default class GameScene extends Phaser.Scene {
             this.minimap.update();
         }
 
+        // STEP 6.25: Update boundary painter (F11) with silhouette-based collision
+        if (this.boundaryPainterActive) {
+            this.updateBoundaryPainterDisplay();
+        }
+
         // STEP 6.5: Handle camera zoom controls (+, -, = keys)
         if (Phaser.Input.Keyboard.JustDown(this.keyPlus) || Phaser.Input.Keyboard.JustDown(this.keyEquals)) {
             this.cameraZoom = Math.min(this.maxZoom, this.cameraZoom + 0.1);
@@ -2652,74 +4072,208 @@ export default class GameScene extends Phaser.Scene {
             this.nextBoundsCheck = time + 1000;
         }
 
-        // --- TILE GUARD: Failsafe blocked tile check (Every Frame) ---
+        // --- TILE GUARD: 8px Sub-Grid Collision System with Bitmask Validation (Every Frame) ---
+        // Uses 8px sub-grid cells from collision_map.json instead of 32px Tilemap layer
+        // Checks sub-grid bitmask: if cell is walkable in PATHFINDING_ANALYSIS.md, override rollback
         if (this.blockedTiles && this.mapTileWidth && this.mapTileHeight) {
             const tw = this.mapTileWidth;
             const th = this.mapTileHeight;
             const mapW = this.mapW || Math.floor(this.physics.world.bounds.width / tw);
+            const subGridSize = GameScene.SUB_GRID_SIZE;
 
             // Check feet position (sprite origin is at 0.5, 1.0 = bottom center = feet)
-            // For both circular and rectangular bodies, sprite.x and sprite.y represent the feet position
-            // since the origin is set to (0.5, 1.0) in normalizeCharacterSprite
             const feetX = this.player.x;
             const feetY = this.player.y;
 
-            const tx = Math.floor(feetX / tw);
-            const ty = Math.floor(feetY / th);
-
-            // Bounds check for tile coordinates
-            if (tx >= 0 && ty >= 0 && tx < mapW && ty < (this.mapH || Math.floor(this.physics.world.bounds.height / th))) {
-                const idx = ty * mapW + tx;
-
-                if (this.blockedTiles[idx] === 1) {
-                    // We are ON a blocked tile! Rollback immediate.
-                    if (this.lastSafePos) {
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:2551', message: 'Tile Guard blocked tile', data: { tx: tx, ty: ty, feetX: Math.round(feetX), feetY: Math.round(feetY), playerX: Math.round(this.player.x), playerY: Math.round(this.player.y), lastSafeX: Math.round(this.lastSafePos.x), lastSafeY: Math.round(this.lastSafePos.y), bodyType: GameScene.ACTOR_BODY_USE_CIRCLE ? 'circle' : 'rect' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run2', hypothesisId: 'C' }) }).catch(() => { });
-                        // #endregion
-                        console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty}. Rolling back to ${truncate(this.lastSafePos.x)},${truncate(this.lastSafePos.y)}.`);
-                        this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
-                        this.player.setVelocity(0);
-                        // Mark as rolled back to prevent movement processing
-                        this.tileGuardRollback = true;
+            // Get player body dimensions for multi-point collision check
+            const bodyRadius = GameScene.ACTOR_BODY_USE_CIRCLE 
+                ? GameScene.ACTOR_BODY_CIRCLE_RADIUS 
+                : Math.max(GameScene.ACTOR_BODY_W, GameScene.ACTOR_BODY_H) / 2;
+            
+            // Check multiple sub-grid points around player position
+            // TIGHT WRAP VERIFICATION: Sub-grid cells are 8px, allowing player to stand within 4px of visual edge
+            // The checkPoints are generated at 8px intervals, meaning the closest check to a boundary is 4px away
+            // This enables tight-wrap boundaries: player can get closer to visual silhouettes
+            const checkPoints = [];
+            const subGridOffset = Math.ceil(bodyRadius / subGridSize) + 1;
+            
+            // Generate check points in a grid pattern around player
+            // Each point is checked against sub-grid bitmask to allow 4px proximity to shrunk boundaries
+            for (let sx = -subGridOffset; sx <= subGridOffset; sx++) {
+                for (let sy = -subGridOffset; sy <= subGridOffset; sy++) {
+                    const checkX = feetX + (sx * subGridSize);
+                    const checkY = feetY + (sy * subGridSize);
+                    const dist = Math.hypot(sx * subGridSize, sy * subGridSize);
+                    if (dist <= bodyRadius + subGridSize) {
+                        checkPoints.push({ x: checkX, y: checkY });
                     }
-                } else {
-                    // Safe tile, update last safe pos
-                    if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
-                    this.lastSafePos.set(this.player.x, this.player.y);
-                    this.tileGuardRollback = false;
                 }
             }
 
-            // Anti-Clip Failsafe: If moving but position unchanged
-            const speed = this.player.body.speed;
-            if (speed > 10 && this.lastSafePos) {
-                const moved = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.lastSafePos.x, this.lastSafePos.y);
-                if (moved < 1) { // Not moving despite velocity
-                    if (!this.stuckTimer) this.stuckTimer = 0;
-                    this.stuckTimer += dt;
-                    if (this.stuckTimer > 400) {
-                        // Nudge slightly
-                        this.player.body.x += (Math.random() - 0.5) * 4;
-                        this.player.body.y += (Math.random() - 0.5) * 4;
-                        this.stuckTimer = 0;
+            // Check each sub-grid point using bitmask from collision_map.json
+            let blockedPointFound = false;
+            let blockedTileCoords = null;
+
+            for (const point of checkPoints) {
+                // Convert to tile coordinates
+                const tx = Math.floor(point.x / tw);
+                const ty = Math.floor(point.y / th);
+
+                // Bounds check for tile coordinates
+                if (tx >= 0 && ty >= 0 && tx < mapW && ty < (this.mapH || Math.floor(this.physics.world.bounds.height / th))) {
+                    const idx = ty * mapW + tx;
+
+                    // Check 32px tile collision first
+                    if (this.blockedTiles[idx] === 1) {
+                        // Shadow Culling: Check if this tile is ONLY in shadow layers
+                        let isShadowOnly = false;
+                        if (this.shadowLayers && this.shadowLayers.length > 0) {
+                            let hasNonShadowTile = false;
+                            let hasShadowTile = false;
+                            
+                            for (const layerName in this.layers) {
+                                const layer = this.layers[layerName];
+                                if (layer && layer.type === 'tilelayer') {
+                                    const tile = layer.getTileAt(tx, ty);
+                                    if (tile && tile.index !== -1) {
+                                        const isShadowLayer = this.shadowLayers.includes(layerName);
+                                        if (isShadowLayer) {
+                                            hasShadowTile = true;
+                                        } else {
+                                            hasNonShadowTile = true;
+                                        }
+                                    }
+                                }
+                            }
+                            isShadowOnly = hasShadowTile && !hasNonShadowTile;
+                        }
+
+                        if (!isShadowOnly) {
+                            // Check sub-grid bitmask from collision_map.json
+                            const tileKey = `${tx},${ty}`;
+                            const subGridEntry = this.subGridCollisionData?.[tileKey];
+                            
+                            if (subGridEntry !== undefined) {
+                                // Handle both formats: number (legacy) or object { mask, alpha_threshold_passed }
+                                let subGridMask;
+                                if (typeof subGridEntry === 'number') {
+                                    subGridMask = subGridEntry;
+                                } else if (subGridEntry && typeof subGridEntry === 'object' && 'mask' in subGridEntry) {
+                                    subGridMask = subGridEntry.mask;
+                                } else {
+                                    subGridMask = 0x0000; // Default to walkable if format is invalid
+                                }
+                                
+                                // Calculate which sub-grid cell the point is in (0-15)
+                                const subX = Math.floor((point.x % tw) / subGridSize);
+                                const subY = Math.floor((point.y % th) / subGridSize);
+                                const subCellIndex = subY * 4 + subX; // 4x4 grid: 0-15
+                                
+                                // Check if this sub-cell is walkable (bit = 0 means walkable)
+                                const isWalkable = !(subGridMask & (1 << subCellIndex));
+                                
+                                if (isWalkable) {
+                                    // Sub-grid cell is walkable - allow movement even if tile is blocked
+                                    // TIGHT WRAP VERIFICATION: This enables 4px proximity to shrunk boundaries
+                                    // Since sub-grid cells are 8px, player can stand within 4px of visual edge
+                                    // This eliminates "invisible wall" effect from Global Boundary Shrink
+                                    continue; // Skip this point, check next
+                                }
+                            }
+                            
+                            // Also check PATHFINDING_ANALYSIS.md validation
+                            const pathfindingAnalysisValid = this.isCoordinateInPath(tx, ty);
+                            if (pathfindingAnalysisValid) {
+                                // Pathfinding says it's valid - allow movement
+                                continue;
+                            }
+                            
+                            // No walkable sub-cell found, block movement
+                            blockedPointFound = true;
+                            blockedTileCoords = { tx, ty };
+                            break;
+                        } else {
+                            // Shadow-only tile - allow movement
+                            console.log(`🔍 Shadow Culling: Allowing movement through shadow-only tile at ${tx},${ty}`);
+                        }
                     }
-                } else {
+                }
+            }
+
+            if (blockedPointFound && blockedTileCoords) {
+                // Collision detected - rollback
+                if (this.lastSafePos) {
+                    const { tx, ty } = blockedTileCoords;
+                    console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty} (sub-grid bitmask check). Rolling back to ${truncate(this.lastSafePos.x)},${truncate(this.lastSafePos.y)}.`);
+                    
+                    this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
+                    this.player.setVelocity(0);
+                    this.tileGuardRollback = true;
+                }
+            } else {
+                // All sub-grid points are safe, update last safe pos
+                if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
+                this.lastSafePos.set(this.player.x, this.player.y);
+                this.tileGuardRollback = false;
+            }
+        }
+
+        // Anti-Clip Failsafe: If moving but position unchanged
+        const speed = this.player.body.speed;
+        if (speed > 10 && this.lastSafePos) {
+            const moved = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.lastSafePos.x, this.lastSafePos.y);
+            if (moved < 1) { // Not moving despite velocity
+                if (!this.stuckTimer) this.stuckTimer = 0;
+                this.stuckTimer += dt;
+                if (this.stuckTimer > 400) {
+                    // Nudge slightly
+                    this.player.body.x += (Math.random() - 0.5) * 4;
+                    this.player.body.y += (Math.random() - 0.5) * 4;
                     this.stuckTimer = 0;
                 }
+            } else {
+                this.stuckTimer = 0;
             }
         }
 
 
         this.interactionTarget = null;
         this.interactionType = null;
+        this.nearestNPC = null; // Reset nearest NPC each frame
 
+        // Check for quest items and other interactables in interaction range
+        // Quest items use 8px sub-grid zones
         this.physics.world.overlap(this.player, this.interactables, (_, item) => {
             if (!this.interactionTarget) {
                 this.interactionTarget = item;
-                this.interactionType = 'interactable';
+                const kind = item.data ? item.data.get('kind') : null;
+                // Set interaction type based on kind
+                if (kind === 'quest_item') {
+                    this.interactionType = 'quest_item';
+                } else if (kind === 'suspect') {
+                    this.interactionType = 'npc';
+                } else {
+                    this.interactionType = 'interactable';
+                }
             }
         });
+
+        // Check NPCs directly (for Space key interaction and prompt display)
+        // Store nearest NPC for prompt display and Space key interaction
+        if (!this.interactionTarget && this.npcs) {
+            let minNPCDistance = 60; // 60px interaction radius
+            
+            this.npcs.forEach(npc => {
+                const distance = Phaser.Math.Distance.Between(
+                    this.player.x, this.player.y,
+                    npc.x, npc.y
+                );
+                if (distance < minNPCDistance) {
+                    minNPCDistance = distance;
+                    this.nearestNPC = npc;
+                }
+            });
+        }
 
         if (!this.interactionTarget) {
             this.physics.world.overlap(this.player, this.transitions, (_, item) => {
@@ -2730,11 +4284,51 @@ export default class GameScene extends Phaser.Scene {
             });
         }
 
-        if (this.interactionTarget) {
-            this.promptText.setVisible(true);
-            this.promptText.setText(this.interactionType === 'transition' ? 'Press E to travel' : 'Press E to interact');
+        // CRITICAL FIX: Show interaction prompt for quest items, NPCs, or other interactables
+        // Force visibility and ensure prompt is always on top
+        if (this.interactionTarget || this.nearestNPC) {
+            // Force prompt visibility
+            if (!this.promptText.visible) {
+                this.promptText.setVisible(true);
+            }
+            this.promptText.setAlpha(1.0);
+            this.promptText.setDepth(10002); // Ensure it's above everything
+            
+            // Diegetic interaction prompts - differentiate between quest items and NPCs
+            let promptMessage = 'Press [E] to Interact';
+            
+            if (this.interactionTarget) {
+                const kind = this.interactionTarget.data ? this.interactionTarget.data.get('kind') : null;
+                if (kind === 'quest_item') {
+                    promptMessage = 'Press [E] to Inspect';
+                } else if (kind === 'suspect') {
+                    promptMessage = 'Press [E] to Talk';
+                } else if (this.interactionType === 'transition') {
+                    promptMessage = 'Press [E] to Travel';
+                } else {
+                    promptMessage = 'Press [E] to Interact';
+                }
+            } else if (this.nearestNPC) {
+                // NPC interaction prompt
+                promptMessage = 'Press [E] to Talk';
+            }
+            
+            this.promptText.setText(promptMessage);
+            
+            // Update fallback HTML prompt as backup
+            this.updateFallbackPrompt(promptMessage, true);
+            
+            // DEBUG: Log interaction detection
+            if (this.interactionTarget) {
+                const kind = this.interactionTarget.data ? this.interactionTarget.data.get('kind') : 'unknown';
+                console.log(`🔍 Interaction detected: ${kind} - Showing prompt: ${promptMessage}`);
+            } else if (this.nearestNPC) {
+                console.log(`🔍 NPC interaction detected - Showing prompt: ${promptMessage}`);
+            }
         } else {
             this.promptText.setVisible(false);
+            // Hide fallback prompt
+            this.updateFallbackPrompt('', false);
         }
 
         // Movement Normalization (skip if Tile Guard rolled back)
@@ -2821,22 +4415,13 @@ export default class GameScene extends Phaser.Scene {
             this.updatePlayerAnimation(0, 0, 0, 0, false);
         }
 
-        // NPC Interaction (Space)
+        // NPC Interaction (Space) - Only if no other interaction target
+        // E key is handled by handleInteractable() for quest items and other interactables
         if (Phaser.Input.Keyboard.JustDown(this.input.keyboard.addKey('SPACE'))) {
-            let nearest = null;
-            let minDst = 60; // 60px radius
-
-            if (this.npcs) {
-                this.npcs.forEach(npc => {
-                    const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, npc.x, npc.y);
-                    if (d < minDst) {
-                        minDst = d;
-                        nearest = npc;
-                    }
-                });
-            }
-
-            if (nearest) {
+            // Only interact with NPCs if no quest item or other interactable is targeted
+            if (!this.interactionTarget && this.nearestNPC) {
+                const nearest = this.nearestNPC;
+                
                 // Stop Player
                 this.player.setVelocity(0);
 
@@ -2937,20 +4522,96 @@ export default class GameScene extends Phaser.Scene {
             upsertEvidence(entry);
             addTimelineEvent({ text: `Evidence collected: ${data.title || data.id}` });
             this.evidenceModal.open(entry);
+            // Play Zelda-style item collection sound
+            if (this.audio) {
+                this.audio.playSfx('item_collect', { volume: 0.8 });
+            }
             // Trigger quest completion checks
             if (this.questSystem) {
                 this.questSystem.checkQuestCompletion({ type: 'evidence_scanned', id: data.id });
             }
             return;
         }
+        if (kind === 'quest_item') {
+            // Quest item collection handler
+            const questItem = QUEST_ITEMS[data.id];
+            if (!questItem) {
+                console.error(`Quest item ${data.id} not found in QUEST_ITEMS`);
+                return;
+            }
+            
+            // Add to evidence/inventory
+            const entry = {
+                id: questItem.id,
+                title: questItem.name,
+                description: questItem.description,
+                image: questItem.spriteKey,
+                metadata: {
+                    questPath: questItem.questPath,
+                    questObjective: questItem.questObjective,
+                    hexColor: questItem.hexColor
+                }
+            };
+            upsertEvidence(entry);
+            addTimelineEvent({ text: `Quest item collected: ${questItem.name}` });
+            
+            // Play Zelda-style item collection sound
+            if (this.audio) {
+                this.audio.playSfx('item_collect', { volume: 0.8 });
+            }
+            
+            // CRITICAL FIX: Open InterrogationUI with quest item context
+            // This was identified in the audit as missing - now properly implemented
+            this.interrogationUI.open({
+                id: questItem.id,
+                name: questItem.name,
+                portrait: `assets/portraits/${questItem.id}.png`,
+                questItem: true,
+                questPath: questItem.questPath,
+                questObjective: questItem.questObjective,
+                description: questItem.description
+            });
+            
+            // Complete quest objective
+            if (this.questSystem && questItem.questObjective) {
+                this.questSystem.checkQuestCompletion({
+                    type: 'quest_item_collected',
+                    id: questItem.id,
+                    objectiveId: questItem.questObjective
+                });
+            }
+            
+            // Refresh quest tracker UI to show updated objective
+            if (this.questTrackerUI) {
+                this.questTrackerUI.refresh();
+            }
+            
+            // Remove item from world (destroy interactable zone)
+            if (this.interactionTarget) {
+                // Remove visual indicator if it exists
+                const indicator = this.interactionTarget.getData('indicator');
+                if (indicator) {
+                    indicator.destroy();
+                }
+                this.interactionTarget.destroy();
+            }
+            
+            return;
+        }
         if (kind === 'suspect') {
             setSuspectMeta(data.id, { id: data.id, name: data.title, portrait: data.portrait });
             addTimelineEvent({ text: `Approached suspect: ${data.title || data.id}` });
-            this.interrogationUI.open({
-                id: data.id,
-                name: data.title,
-                portrait: data.portrait
-            });
+            // Use DialogueBoxUI for suspect interactions (Pokemon style)
+            if (this.dialogueUI) {
+                this.dialogueUI.startDialogue(data.id);
+            } else {
+                console.error('DialogueUI not initialized, falling back to InterrogationUI');
+                this.interrogationUI.open({
+                    id: data.id,
+                    name: data.title,
+                    portrait: data.portrait
+                });
+            }
             // Trigger quest completion checks
             if (this.questSystem) {
                 this.questSystem.checkQuestCompletion({ type: 'interrogation_started', id: data.id });

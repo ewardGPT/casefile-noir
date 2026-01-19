@@ -37,8 +37,8 @@ export class QuestSystem {
         this.activeQuest = null;
         this.events = new Phaser.Events.EventEmitter();
 
-        // Listen for global state updates if needed, 
-        // but for now we'll drive it from here.
+        // Store a reference to the current marker
+        this.waypointMarker = null;
     }
 
     init() {
@@ -50,6 +50,9 @@ export class QuestSystem {
         } else if (state.quests.active) {
             this.activeQuest = state.quests.active;
             this.emitUpdate();
+            if (this.activeQuest.target) {
+                this.createWaypointMarker(this.activeQuest.target);
+            }
         }
     }
 
@@ -61,6 +64,10 @@ export class QuestSystem {
         }
 
         this.activeQuest = questDef;
+        // Create a waypoint marker for the active quest target
+        if (questDef.target && questDef.target.x !== undefined && questDef.target.y !== undefined) {
+            this.createWaypointMarker(questDef.target);
+        }
         setActiveQuest(questDef);
         this.emitUpdate();
 
@@ -77,7 +84,9 @@ export class QuestSystem {
         const nextId = this.activeQuest.next;
         completeActiveQuest();
 
-        // Show completion effect?
+        // Optionally remove waypoint marker when the quest is completed
+        this.removeWaypointMarker();
+        this.emitUpdate();
 
         if (nextId) {
             this.startQuest(nextId);
@@ -143,5 +152,27 @@ export class QuestSystem {
 
     getActiveQuest() {
         return this.activeQuest;
+    }
+
+    createWaypointMarker(target) {
+        if (this.waypointMarker) {
+            this.waypointMarker.destroy();
+        }
+        this.waypointMarker = this.scene.add.circle(target.x, target.y, 10, 0xffcc00, 0.5);
+        this.waypointMarker.setScrollFactor(0);
+        this.waypointMarker.setDepth(3000);
+        console.log(`Created waypoint marker at location (${target.x}, ${target.y})`);
+    }
+
+    removeWaypointMarker() {
+        if (this.waypointMarker) {
+            this.waypointMarker.destroy();
+            this.waypointMarker = null;
+            console.log('Removed waypoint marker');
+            if (this.scene?.minimap) {
+                this.scene.minimap.setQuestTarget(null);
+                console.log('Minimap quest target cleared.');
+            }
+        }
     }
 }

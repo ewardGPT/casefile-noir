@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { loadCollisionDataCache, mergeCollisionData } from '../data/CollisionDataManager.js';
 
 export default class Boot extends Phaser.Scene {
     constructor() {
@@ -79,6 +80,44 @@ export default class Boot extends Phaser.Scene {
         for (let i = 1; i <= 35; i++) {
             this.load.spritesheet(`npc_${i}`, `assets/sprites/characters/npc_${i}.png`, { frameWidth: 64, frameHeight: 64 });
         }
+
+        // Load Spawn Configuration
+        this.load.json('spawn_config', 'spawn_config.json');
+
+        // Load Collision Map Data (8px sub-grid collision system)
+        // This file contains coordinate-indexed collision masks synced with COLOR_MANIFEST.js
+        // Path: public/data/collision_map.json (server serves from client/ root)
+        this.load.json('collision_map', 'data/collision_map.json');
+
+        // Load NPC portrait images (if they exist - fallback to detective sprite if missing)
+        // Note: Phaser will log warnings for missing files but continue execution
+        for (let i = 1; i <= 35; i++) {
+            this.load.image(`portrait_npc_${i}`, `assets/portraits/npc_${i}.png`);
+        }
+        
+        // Load dialogue UI assets (if custom graphics exist)
+        this.load.image('dialogue_frame', 'assets/ui/dialogue_frame.png');
+        this.load.image('dialogue_arrow', 'assets/ui/dialogue_arrow.png');
+
+        // Load Quest Marker sprites (quest NPC icons for minimap/UI)
+        // Quest markers are used to indicate quest targets on the minimap
+        for (let i = 1; i <= 5; i++) {
+            this.load.image(`quest_marker_${i}`, `assets/sprites/characters/quest/quest_npc_${i}.png`);
+        }
+
+        // Load Cafe logo asset (if it exists)
+        // This is used for location markers or UI elements
+        this.load.image('cafe_logo', 'assets/ui/cafe_logo.png');
+        
+        // Load audio effects for quest items and dialogue
+        // Note: These will use fallback sounds if files don't exist
+        this.load.audio('item_collect', 'assets/audio/sfx/item_collect.ogg');
+        this.load.audio('typewriter_beep', 'assets/audio/sfx/typewriter_beep.ogg');
+        this.load.audio('victory_fanfare', 'assets/audio/sfx/victory_fanfare.ogg');
+        this.load.audio('failure_sound', 'assets/audio/sfx/failure_sound.ogg');
+        
+        // Note: NPC billboards are created dynamically using Phaser Graphics
+        // (see NPC.js createBillboardNameplate method) - no external assets needed
     }
 
     create() {
@@ -147,7 +186,67 @@ export default class Boot extends Phaser.Scene {
         // Sanity check: log all animation keys
         const animKeys = Object.keys(this.anims.anims.entries || {});
         console.log('✅ Anim keys created:', animKeys);
-        
+
+        // Initialize global CollisionData registry from collision_map.json
+        // This provides persistent storage for the 8px sub-grid collision system
+        // Supports both old format ({ "x,y": mask }) and new format ({ "x,y": { mask, alpha_threshold_passed } })
+        // Merges with localStorage cache to preserve tight boundaries from Agent 3 updates
+        try {
+            const collisionMapData = this.cache.json.get('collision_map');
+            let staticData = {};
+            
+            if (collisionMapData && collisionMapData.collisionData) {
+                // Normalize static collision data: ensure all entries use new format
+                for (const [key, value] of Object.entries(collisionMapData.collisionData)) {
+                    if (typeof value === 'number') {
+                        // Old format: convert to new format
+                        staticData[key] = {
+                            mask: value,
+                            alpha_threshold_passed: false
+                        };
+                    } else if (value && typeof value === 'object' && 'mask' in value) {
+                        // New format: use as-is
+                        staticData[key] = value;
+                    } else {
+                        // Invalid format: skip or use default
+                        console.warn(`⚠️ Invalid collision entry for ${key}, skipping`);
+                    }
+                }
+            }
+            
+            // Load cached CollisionData from localStorage (tight boundaries from Agent 3)
+            const cachedData = loadCollisionDataCache();
+            
+            // Merge: cached data (tight boundaries) takes precedence over static data
+            const mergedData = mergeCollisionData(staticData, cachedData);
+            
+            // Store in global Registry variable as CollisionData
+            if (typeof window !== 'undefined') {
+                window.CollisionData = mergedData;
+                // Also store metadata for reference
+                window.CollisionDataMetadata = collisionMapData?._metadata || {};
+                const cachedCount = cachedData ? Object.keys(cachedData.collisionData || {}).length : 0;
+                console.log('✅ CollisionData loaded:', Object.keys(mergedData).length, 'tiles initialized', 
+                           cachedCount > 0 ? `(${cachedCount} tight boundaries from cache)` : '');
+            } else {
+                // Fallback for non-browser environments
+                global.CollisionData = mergedData;
+                global.CollisionDataMetadata = collisionMapData?._metadata || {};
+                console.log('✅ CollisionData loaded (global):', Object.keys(mergedData).length, 'tiles initialized');
+            }
+        } catch (error) {
+            console.error('❌ Failed to load CollisionData:', error);
+            // Initialize empty CollisionData to prevent errors
+            const emptyCollisionData = {};
+            if (typeof window !== 'undefined') {
+                window.CollisionData = emptyCollisionData;
+                window.CollisionDataMetadata = {};
+            } else {
+                global.CollisionData = emptyCollisionData;
+                global.CollisionDataMetadata = {};
+            }
+        }
+
         console.log("Boot scene complete. Starting Menu...");
         try {
             this.scene.start('StartMenu');
@@ -163,7 +262,7 @@ export default class Boot extends Phaser.Scene {
         const bg = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.9);
         bg.setScrollFactor(0);
         bg.setDepth(10000);
-        
+
         const errorText = this.add.text(width / 2, height / 2 - 50, 'MAP LOADING ERROR', {
             fontSize: '32px',
             fontFamily: 'monospace',
@@ -173,7 +272,7 @@ export default class Boot extends Phaser.Scene {
         errorText.setOrigin(0.5);
         errorText.setScrollFactor(0);
         errorText.setDepth(10001);
-        
+
         const msgText = this.add.text(width / 2, height / 2 + 20, message, {
             fontSize: '18px',
             fontFamily: 'monospace',
@@ -184,7 +283,7 @@ export default class Boot extends Phaser.Scene {
         msgText.setOrigin(0.5);
         msgText.setScrollFactor(0);
         msgText.setDepth(10001);
-        
+
         const hintText = this.add.text(width / 2, height / 2 + 100, 'Check console for details', {
             fontSize: '14px',
             fontFamily: 'monospace',

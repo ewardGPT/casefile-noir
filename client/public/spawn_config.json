@@ -1,0 +1,303 @@
+{
+  "version": "1.0.0",
+  "description": "Persistent global spawn points for Casefile Noir based on pathfinding analysis",
+  "lastUpdated": "2026-01-19",
+  "spawnPoints": [
+    {
+      "id": "spawn_speedrun",
+      "name": "Spawn: Speedrun (Pennyworth Lane)",
+      "route": "Route 1 - The Speedrun",
+      "coordinates": {
+        "x": 2200,
+        "y": 2200,
+        "z": 0
+      },
+      "locationTag": "pennyworth_lane",
+      "description": "Optimal turnaround point for Route 1 speedrun. Places player near Old Willy quest-critical NPC.",
+      "rationale": "Pennyworth Lane is the critical turnaround point in Route 1. Starting here eliminates travel back from Police Station.",
+      "waypoints": [
+        {
+          "order": 1,
+          "npcId": "old_willy",
+          "action": "TALK_TO_NPC",
+          "distance": 100,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 2,
+          "npcId": "mary_henshaw",
+          "action": "TALK_TO_NPC",
+          "distance": 150,
+          "priority": "HIGH"
+        },
+        {
+          "order": 3,
+          "npcId": "mr_cobb",
+          "action": "TALK_TO_NPC",
+          "distance": 200,
+          "priority": "LOW"
+        }
+      ],
+      "collisionCheck": {
+        "safeZone": true,
+        "bufferTiles": 2,
+        "groundType": "paved",
+        "nearestObstacle": {
+          "distance": 150,
+          "direction": "north"
+        }
+      },
+      "unlockCondition": {
+        "type": "quest_stage",
+        "questId": "day_1_investigation",
+        "stage": 0
+      },
+      "efficiencyMetrics": {
+        "timeToComplete": "8-10 minutes",
+        "npcCount": 3,
+        "backtracking": 0,
+        "efficiencyScore": 92
+      }
+    },
+    {
+      "id": "spawn_balanced",
+      "name": "Spawn: Balanced (School Zone)",
+      "route": "Route 2 - The Balanced",
+      "coordinates": {
+        "x": 1600,
+        "y": 1600,
+        "z": 0
+      },
+      "locationTag": "school",
+      "description": "Strategic midpoint for Route 2. Places player in the school zone with access to 3 key suspects.",
+      "rationale": "School zone serves as the natural midpoint in Route 2, offering access to Finch, Whitcombe, and Evie.",
+      "waypoints": [
+        {
+          "order": 1,
+          "npcId": "mr_finch",
+          "action": "TALK_TO_NPC",
+          "distance": 80,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 2,
+          "npcId": "headmaster_whitcombe",
+          "action": "TALK_TO_NPC",
+          "distance": 100,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 3,
+          "npcId": "evie_moreland",
+          "action": "TALK_TO_NPC",
+          "distance": 120,
+          "priority": "HIGH"
+        },
+        {
+          "order": 4,
+          "npcId": "samuel_atwell",
+          "action": "TALK_TO_NPC",
+          "distance": 150,
+          "priority": "MEDIUM"
+        }
+      ],
+      "collisionCheck": {
+        "safeZone": true,
+        "bufferTiles": 3,
+        "groundType": "courtyard",
+        "nearestObstacle": {
+          "distance": 100,
+          "direction": "west"
+        }
+      },
+      "unlockCondition": {
+        "type": "quest_stage",
+        "questId": "day_1_investigation",
+        "stage": 0
+      },
+      "efficiencyMetrics": {
+        "timeToComplete": "15-18 minutes",
+        "npcCount": 4,
+        "backtracking": 0,
+        "efficiencyScore": 78
+      }
+    },
+    {
+      "id": "spawn_resource",
+      "name": "Spawn: Resource-Heavy (Risky Passage)",
+      "route": "Route 3 - The Safe/Resource-Heavy",
+      "coordinates": {
+        "x": 3000,
+        "y": 2200,
+        "z": 0
+      },
+      "locationTag": "risky_passage",
+      "description": "Extended exploration point for Route 3. Places player at Risky Passage for Samuel investigation path.",
+      "rationale": "Risky Passage is the furthest point in Route 3's extended exploration, critical for the Samuel Atwell investigation path.",
+      "waypoints": [
+        {
+          "order": 1,
+          "npcId": "ada_merriweather",
+          "action": "TALK_TO_NPC",
+          "distance": 60,
+          "priority": "HIGH"
+        },
+        {
+          "order": 2,
+          "clueId": "clue_bloody_cloth",
+          "action": "COLLECT_CLUE",
+          "distance": 150,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 3,
+          "npcId": "samuel_atwell",
+          "action": "INTERROGATE",
+          "distance": 200,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 4,
+          "locationId": "lions_den",
+          "action": "GO_TO_LOCATION",
+          "distance": 300,
+          "priority": "HIGH"
+        }
+      ],
+      "collisionCheck": {
+        "safeZone": true,
+        "bufferTiles": 2,
+        "groundType": "cobblestone",
+        "nearestObstacle": {
+          "distance": 80,
+          "direction": "south"
+        }
+      },
+      "unlockCondition": {
+        "type": "quest_stage",
+        "questId": "day_1_investigation",
+        "stage": 0
+      },
+      "efficiencyMetrics": {
+        "timeToComplete": "25-35 minutes",
+        "npcCount": 2,
+        "clueCount": 1,
+        "locationCount": 2,
+        "backtracking": 0,
+        "efficiencyScore": 55
+      }
+    },
+    {
+      "id": "spawn_default",
+      "name": "Spawn: Default (Police Station)",
+      "route": "Initial Game State",
+      "coordinates": {
+        "x": 1100,
+        "y": 1100,
+        "z": 0
+      },
+      "locationTag": "police_station",
+      "description": "Starting point for new games. Places player at Police Station with access to Edwin Clarke.",
+      "rationale": "Police Station is the canonical starting location for the detective character.",
+      "waypoints": [
+        {
+          "order": 1,
+          "npcId": "edwin_clarke",
+          "action": "TALK_TO_NPC",
+          "distance": 50,
+          "priority": "CRITICAL"
+        },
+        {
+          "order": 2,
+          "clueId": "desk_receipt",
+          "action": "COLLECT_CLUE",
+          "distance": 60,
+          "priority": "HIGH"
+        }
+      ],
+      "collisionCheck": {
+        "safeZone": true,
+        "bufferTiles": 2,
+        "groundType": "wood_floor",
+        "nearestObstacle": {
+          "distance": 80,
+          "direction": "east"
+        }
+      },
+      "unlockCondition": {
+        "type": "always",
+        "value": true
+      },
+      "efficiencyMetrics": {
+        "timeToComplete": "N/A - Starting point",
+        "npcCount": 1,
+        "clueCount": 1,
+        "backtracking": 0,
+        "efficiencyScore": 100
+      }
+    }
+  ],
+  "spawnZones": [
+    {
+      "id": "zone_pennyworth_lane",
+      "centerX": 2200,
+      "centerY": 2200,
+      "radius": 300,
+      "spawnIds": ["spawn_speedrun"],
+      "nearbyNPCs": ["old_willy", "mary_henshaw", "mr_cobb"],
+      "groundType": "paved",
+      "lighting": "street_lamps",
+      "timeRestriction": null
+    },
+    {
+      "id": "zone_school",
+      "centerX": 1600,
+      "centerY": 1600,
+      "radius": 400,
+      "spawnIds": ["spawn_balanced"],
+      "nearbyNPCs": ["mr_finch", "headmaster_whitcombe", "evie_moreland", "samuel_atwell", "lillian_harrow", "beatrice_holloway", "clara_redford", "james_calder", "mrs_loxley"],
+      "groundType": "courtyard",
+      "lighting": "daylight",
+      "timeRestriction": null
+    },
+    {
+      "id": "zone_risky_passage",
+      "centerX": 3000,
+      "centerY": 2200,
+      "radius": 250,
+      "spawnIds": ["spawn_resource"],
+      "nearbyNPCs": ["ada_merriweather"],
+      "groundType": "cobblestone",
+      "lighting": "dim",
+      "timeRestriction": null
+    },
+    {
+      "id": "zone_police_station",
+      "centerX": 1100,
+      "centerY": 1100,
+      "radius": 200,
+      "spawnIds": ["spawn_default"],
+      "nearbyNPCs": ["edwin_clarke", "arthur_kosminski", "mr_ashcombe"],
+      "groundType": "wood_floor",
+      "lighting": "indoor",
+      "timeRestriction": null
+    }
+  ],
+  "navigation": {
+    "pathfindingAlgorithm": "A*",
+    "collisionResolution": "slide",
+    "interactionRadius": 80,
+    "npcPathUpdateInterval": 500
+  },
+  "metadata": {
+    "generatedFrom": "PATHFINDING_ANALYSIS.md",
+    "analysisDate": "2026-01-19",
+    "mapVersion": "1.0",
+    "tileSize": 32,
+    "mapDimensions": {
+      "width": 128,
+      "height": 128,
+      "pixels": 4096
+    }
+  }
+}

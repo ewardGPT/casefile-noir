@@ -141,6 +141,10 @@ export class AccusationSystem {
     this.container = this.scene.add.container(x, y);
     this.container.setDepth(4100);
 
+    // Initial state for animations (fade-in + scale)
+    this.container.setAlpha(0);
+    this.container.setScale(0.8);
+
     const bg = this.scene.add.rectangle(
       width / 2,
       height / 2,
@@ -234,6 +238,35 @@ export class AccusationSystem {
     this.scene.input.keyboard.once('keydown-R', onRestart);
 
     this.container.add(restartBtn);
+
+    // Add fade-in animation (500ms duration for professional "snappy" feel)
+    this.scene.tweens.add({
+      targets: this.container,
+      alpha: 1,
+      duration: 500,
+      ease: 'Power2'
+    });
+
+    // Add scale animation (Ease-Out for smooth entrance)
+    this.scene.tweens.add({
+      targets: this.container,
+      scale: 1,
+      duration: 600,
+      ease: 'Back.easeOut'
+    });
+
+    // Play victory/failure sound based on ending type
+    if (this.scene.sound) {
+      try {
+        if (result.endingType === 'GOOD') {
+          this.scene.sound.play('victory_fanfare', { volume: 0.7 });
+        } else if (result.endingType === 'BAD') {
+          this.scene.sound.play('failure_sound', { volume: 0.7 });
+        }
+      } catch (e) {
+        // Fallback: sound files may not exist, continue silently
+      }
+    }
   }
 
   private restartGame(): void {

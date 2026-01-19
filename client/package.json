@@ -4,16 +4,20 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "dev": "vite",
+        "dev": "BROWSER=none vite --host",
         "build": "tsc && vite build",
         "preview": "vite preview",
         "predev": "node ../scripts/generate-manifest.js",
         "qa": "npm run qa:health && npm run qa:assets && npm run qa:map && npm run qa:scenes && npm run qa:npcs",
         "qa:health": "node qa/qa-health.js",
+        "jest": {
+            "setupFiles": [ "jest-canvas-mock" ]
+        },
         "qa:assets": "node qa/qa-assets.js",
         "qa:map": "node qa/qa-map.js",
         "qa:scenes": "node qa/qa-scenes.js",
         "qa:npcs": "node qa/qa-npcs.js",
+        "test": "jest --verbose",
         "qa:build": "vite build"
     },
     "devDependencies": {
