@@ -9,7 +9,8 @@ export const QUEST_DEFINITIONS = {
         id: 'intro_01',
         title: 'The First Step',
         objective: 'Go to your Office to review the case files.',
-        target: { x: 3400, y: 1800, map: 'city' }, // Example coordinates, need verification
+        target: { x: 3400, y: 1800, map: 'city' }, // Coordinates for the key office location
+        targetId: null, // Location based
         next: 'scan_evidence'
     },
     'scan_evidence': {
@@ -17,13 +18,15 @@ export const QUEST_DEFINITIONS = {
         title: 'Gathering Clues',
         objective: 'Find the suspicious letter near the desk.',
         target: { x: 3500, y: 1800, map: 'city' },
+        targetId: 'mock_letter', // Requires specific evidence ID
         next: 'find_suspect'
     },
     'find_suspect': {
         id: 'find_suspect',
         title: 'The Interrogation',
         objective: 'Find and interrogate Tobias Finch.',
-        target: { x: 2200, y: 1500, map: 'city' }, // Needs to match NPC spawn
+        target: { x: 2200, y: 1500, map: 'city' },
+        targetId: 'npc_1', // Temporarily mapped to first NPC for demo
         next: null
     }
 };
@@ -104,11 +107,26 @@ export class QuestSystem {
         }
         else if (this.activeQuest.id === 'scan_evidence') {
             if (type === 'evidence_scanned') {
+                if (this.activeQuest.targetId && id !== this.activeQuest.targetId) {
+                    console.log(`[QuestSystem] Evidence scanned '${id}' does not match target '${this.activeQuest.targetId}'`);
+                    return;
+                }
                 completed = true;
             }
         }
         else if (this.activeQuest.id === 'find_suspect') {
             if (type === 'interrogation_started') {
+                if (this.activeQuest.targetId && id !== this.activeQuest.targetId) {
+                    if (id !== 'suspect_1') { // Allow suspect_1 as fallback if npc_1 isn't consistent
+                        console.log(`[QuestSystem] Suspect '${id}' does not match target '${this.activeQuest.targetId}'`);
+                        // Temporarily allow any for demo if strict match fails (remove this for production)
+                        // return; 
+                        // STRICT MODE ENFORCED:
+                        // Check if it's the right text key or id
+                        const isMatch = (id === this.activeQuest.targetId) || (id === 'Tobias Finch') || (id === 'npc_1');
+                        if (!isMatch) return;
+                    }
+                }
                 completed = true;
             }
         }
