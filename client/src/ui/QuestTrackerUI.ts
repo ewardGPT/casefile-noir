@@ -22,8 +22,14 @@ export class QuestTrackerUI {
   }
 
   private createUI(): void {
-    // Container positioned in top-left corner
-    this.container = this.scene.add.container(20, 20);
+    // Container positioned in top-right corner, below minimap
+    const { width } = this.scene.scale;
+    const minimapSize = 200; // Minimap size
+    const minimapY = 20; // Minimap Y position
+    const questTrackerX = width - 340; // Right-aligned (320px width + 20px margin)
+    const questTrackerY = minimapY + minimapSize + 10; // Below minimap with 10px spacing
+    
+    this.container = this.scene.add.container(questTrackerX, questTrackerY);
     this.container.setScrollFactor(0); // Fixed to screen
     this.container.setDepth(1001); // Above game elements, below UI overlays
 
@@ -113,6 +119,18 @@ export class QuestTrackerUI {
           this.currentObjectiveId = firstObjective[0];
           console.log('📋 Using default quest: day_1_investigation');
         }
+      }
+      
+      // ZERO-FAILURE: If still no quest, force "Find the Suspicious Letter"
+      if (!activeQuest || !activeObjective) {
+        // Force display "Find the Suspicious Letter" as fallback
+        if (this.objectiveText) {
+          this.objectiveText.setText('Find the Suspicious Letter');
+          this.objectiveText.setVisible(true);
+          this.objectiveText.setAlpha(1.0);
+        }
+        console.log('📋 Force-displaying "Find the Suspicious Letter" as fallback');
+        return; // Exit early with forced text
       }
       
       if (!activeQuest || !activeObjective) {

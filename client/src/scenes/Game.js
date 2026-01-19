@@ -413,14 +413,32 @@ export default class GameScene extends Phaser.Scene {
                 if (collisionMapData && collisionMapData.collisionData) {
                     this.subGridCollisionData = collisionMapData.collisionData;
                     console.log(`✅ Sub-grid collision data loaded: ${Object.keys(this.subGridCollisionData).length} tiles`);
+                    
+                    // Also merge with global CollisionData if available
+                    if (typeof window !== 'undefined' && window.CollisionData) {
+                        this.subGridCollisionData = { ...window.CollisionData, ...this.subGridCollisionData };
+                        console.log(`✅ Merged with global CollisionData: ${Object.keys(this.subGridCollisionData).length} total tiles`);
+                    }
                 } else {
-                    // Initialize empty sub-grid collision data
-                    this.subGridCollisionData = {};
-                    console.log('⚠️ No sub-grid collision data found, initializing empty');
+                    // Try to use global CollisionData as fallback
+                    if (typeof window !== 'undefined' && window.CollisionData) {
+                        this.subGridCollisionData = window.CollisionData;
+                        console.log(`✅ Using global CollisionData: ${Object.keys(this.subGridCollisionData).length} tiles`);
+                    } else {
+                        // Initialize empty sub-grid collision data
+                        this.subGridCollisionData = {};
+                        console.log('⚠️ No sub-grid collision data found, initializing empty');
+                    }
                 }
             } catch (e) {
                 console.warn('⚠️ Failed to load collision_map.json:', e);
-                this.subGridCollisionData = {};
+                // Try to use global CollisionData as fallback
+                if (typeof window !== 'undefined' && window.CollisionData) {
+                    this.subGridCollisionData = window.CollisionData;
+                    console.log(`✅ Using global CollisionData as fallback: ${Object.keys(this.subGridCollisionData).length} tiles`);
+                } else {
+                    this.subGridCollisionData = {};
+                }
             }
 
 
@@ -1084,9 +1102,11 @@ export default class GameScene extends Phaser.Scene {
             });
         } else {
             console.log("Game.create: No 'Interactables' layer found. Spawning mock evidence.");
-            // Mock Evidence 1: A suspicious letter near spawn
-            const mockX = spawnX + 100;
-            const mockY = spawnY;
+            // Mock Evidence 1: A suspicious letter at first quest location (Mr. Finch at School Zone)
+            // First quest: day_1_investigation, first objective: obj_interview_finch
+            // Location: { x: 1600, y: 1600 } from npcs.js
+            const mockX = 1600; // First quest location X
+            const mockY = 1600; // First quest location Y
             const zone = this.add.rectangle(mockX, mockY, 32, 32, 0x00ff00, 0.5);
             this.physics.add.existing(zone, true);
 
@@ -1094,10 +1114,34 @@ export default class GameScene extends Phaser.Scene {
             zone.setData('id', 'mock_letter');
             zone.setData('title', 'Suspicious Letter');
             zone.setData('image', 'evidence_paper'); // Placeholder key
-            zone.setData('metadata', { description: "A crumpled letter with strange symbols." });
+            zone.setData('metadata', { description: "A crumpled letter with strange symbols found near the school." });
+
+            // CRITICAL: Enable physics body for overlap detection
+            if (zone.body) {
+                zone.body.setSize(32, 32);
+                zone.body.setOffset(0, 0);
+            }
 
             this.interactables.add(zone);
             this.evidenceCatalog.push({ id: 'mock_letter', title: 'Suspicious Letter', image: 'evidence_paper' });
+
+            // Visual indicator with pulsing animation
+            const indicator = this.add.circle(mockX, mockY, 8, 0x00ff00, 0.8);
+            indicator.setStrokeStyle(2, 0x00ff00, 1.0);
+            indicator.setDepth(50);
+            indicator.setVisible(true);
+            indicator.setAlpha(1);
+            
+            // Pulsing animation for visibility
+            this.tweens.add({
+                targets: indicator,
+                scaleX: 1.2,
+                scaleY: 1.2,
+                duration: 1000,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
 
             this.add.text(mockX - 40, mockY - 40, "EVIDENCE", { fontSize: '12px', color: '#00ff00' });
         }
@@ -1267,9 +1311,11 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                         // #endregion
                         this.minimap = new minimapModule.Minimap(this);
                         this.minimap.init();
+                        // Ensure minimap is always visible
+                        this.minimap.setEnabled(true);
                         // #region agent log
                         fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:673', message: 'Minimap initialized successfully', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
-                        console.log('[DEBUG] Minimap initialized successfully');
+                        console.log('[DEBUG] Minimap initialized successfully and enabled');
                         // #endregion
                     } catch (e) {
                         console.warn('Minimap initialization failed:', e);
@@ -1382,6 +1428,24 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
         this.questSystem = new QuestSystem(this);
         this.questUI = new QuestUI(this);
         
+        // MANDATORY FIX: Create local quest data FIRST to bypass broken api.js
+        // ZERO-FAILURE: Quest Board must be visible immediately, no API dependencies
+        this.localQuestData = {
+            activeQuest: {
+                questId: 'day_1_investigation',
+                title: 'Find the Suspicious Letter',
+                objective: 'Search near the Cafe',
+                state: 'active',
+                objectives: {
+                    'obj_interview_finch': {
+                        id: 'obj_interview_finch',
+                        description: 'Search near the Cafe',
+                        completed: false
+                    }
+                }
+            }
+        };
+        
         // MANDATORY FIX: Force-inject Quest Tracker WITHOUT waiting for API
         // Hard-link instantiation immediately, bypassing any API dependencies
         try {
@@ -1409,23 +1473,52 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
             state: 'active'
         };
         
-        // Force-set fallback quest immediately
+        // Force-set fallback quest immediately using local data
         if (this.questTracker) {
+            // Override quest tracker's data source to use local data
+            if (this.localQuestData && this.localQuestData.activeQuest) {
+                this.questTracker.currentQuestId = this.localQuestData.activeQuest.questId;
+                this.questTracker.currentObjectiveId = 'obj_interview_finch';
+            }
             this.questTracker.setQuest('day_1_investigation', 'obj_interview_finch');
-            // Also set mock data directly
+            
+            // ZERO-FAILURE: Force-set objective text to "Find the Suspicious Letter" - must be visible immediately
             if (this.questTracker.objectiveText) {
-                this.questTracker.objectiveText.setText(fallbackQuest.objective);
+                this.questTracker.objectiveText.setText('Find the Suspicious Letter');
                 this.questTracker.objectiveText.setVisible(true);
                 this.questTracker.objectiveText.setAlpha(1.0);
+                this.questTracker.objectiveText.setDepth(10000);
+                console.log('✅ Quest Tracker objective text forced: "Find the Suspicious Letter"');
+            } else {
+                console.warn('⚠️ Quest Tracker objectiveText is null - recreating...');
+                // Recreate if missing
+                if (this.questTracker.container) {
+                    this.questTracker.objectiveText = this.add.text(10, 32, 'Find the Suspicious Letter', {
+                        fontFamily: 'Courier New, Courier, monospace',
+                        fontSize: '14px',
+                        color: '#f5f1e5',
+                        wordWrap: { width: 300, useAdvancedWrap: true },
+                        lineSpacing: 4
+                    });
+                    this.questTracker.objectiveText.setOrigin(0, 0);
+                    this.questTracker.objectiveText.setVisible(true);
+                    this.questTracker.objectiveText.setAlpha(1.0);
+                    this.questTracker.objectiveText.setDepth(10000);
+                    this.questTracker.container.add(this.questTracker.objectiveText);
+                }
             }
             if (this.questTracker.headerText) {
                 this.questTracker.headerText.setVisible(true);
                 this.questTracker.headerText.setAlpha(1.0);
+                this.questTracker.headerText.setDepth(10000);
             }
             if (this.questTracker.background) {
                 this.questTracker.background.setVisible(true);
                 this.questTracker.background.setAlpha(1.0);
+                this.questTracker.background.setDepth(9999);
             }
+            
+            // Force show
             this.questTracker.show();
             
             // MANDATORY: Force visibility and depth on ALL elements
@@ -1438,11 +1531,12 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                     if (child) {
                         child.setVisible(true);
                         child.setAlpha(1.0);
+                        if (child.setDepth) child.setDepth(10000);
                     }
                 });
             }
             
-            console.log('✅ Quest Tracker force-injected with fallback quest:', fallbackQuest);
+            console.log('✅ Quest Tracker force-injected with local data - "Find the Suspicious Letter"');
             console.log('✅ Quest Tracker depth: 9999, visible: true, alpha: 1.0');
         }
         
@@ -1777,11 +1871,11 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
      * @returns {Object} Debug info: {key, frameW, frameH, scale, displayW, displayH, bodyW, bodyH, bodyOffsetX, bodyOffsetY}
      */
     normalizeCharacterSprite(sprite, tileW, tileH) {
-        // MANDATORY FIX: Check if NPC has scale lock (hard-coded 2.0)
-        if (sprite._scaleLocked && sprite._targetScale) {
-            // NPC Scale Lock: Force scale to 2.0 and calculate displayHeight to match detective
-            const lockedScale = sprite._targetScale; // 2.0
-            sprite.setScale(lockedScale);
+        // MANDATORY FIX: NPC Scale Lock - Hard-code scale to 2.0 to match detective exactly
+        if (sprite._scaleLocked) {
+            // ZERO-FAILURE: Hard-code scale to 2.0 - NPCs MUST match detective visually
+            const MANDATORY_NPC_SCALE = 2.0;
+            sprite.setScale(MANDATORY_NPC_SCALE);
             
             // Read frame dimensions
             let frameW, frameH;
@@ -1798,32 +1892,36 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                 frameH = frame ? frame.height : 64;
             }
             
-            // Calculate displayHeight for verification
-            const displayH = frameH * lockedScale;
+            // Calculate displayHeight - must match player (+/- 1px tolerance)
+            const displayH = frameH * MANDATORY_NPC_SCALE;
+            sprite.displayHeight = displayH;
             
-            // Calculate detective's displayHeight for comparison
-            const detectiveTARGET_H = tileH * 1.75;
-            const detectiveFrameH = 64; // Detective uses 64x64 frames
-            const detectiveScale = detectiveTARGET_H / detectiveFrameH;
-            const detectiveDisplayH = detectiveFrameH * detectiveScale;
-            
-            // VERIFICATION: Ensure NPC displayHeight matches detective (+/- 2px tolerance)
-            const heightDiff = Math.abs(displayH - detectiveDisplayH);
-            if (heightDiff > 2) {
-                // Adjust scale to match detective exactly
-                const adjustedScale = detectiveDisplayH / frameH;
-                sprite.setScale(adjustedScale);
-                console.log(`[NPC Scale Match] ${sprite.texture?.key || 'unknown'}: Adjusted scale from ${lockedScale} to ${adjustedScale.toFixed(3)} to match detective displayH (${detectiveDisplayH.toFixed(1)}px)`);
+            // Verify against player if available
+            if (this.player) {
+                const playerFrameH = this.player.frame ? this.player.frame.height : 64;
+                const playerScale = this.player.scaleX || this.player.scale || 1.0;
+                const playerDisplayH = playerFrameH * playerScale;
+                const heightDiff = Math.abs(displayH - playerDisplayH);
+                
+                if (heightDiff > 1) {
+                    // Adjust to match player exactly
+                    const adjustedScale = playerDisplayH / frameH;
+                    sprite.setScale(adjustedScale);
+                    sprite.displayHeight = playerDisplayH;
+                    console.log(`[NPC Scale Match] ${sprite.texture?.key || 'unknown'}: Adjusted scale to ${adjustedScale.toFixed(3)} to match player (NPC: ${playerDisplayH.toFixed(1)}px, Player: ${playerDisplayH.toFixed(1)}px)`);
+                } else {
+                    console.log(`[NPC Scale Match] ${sprite.texture?.key || 'unknown'}: Scale ${MANDATORY_NPC_SCALE} matches player (NPC: ${displayH.toFixed(1)}px, Player: ${playerDisplayH.toFixed(1)}px, diff: ${heightDiff.toFixed(1)}px)`);
+                }
             } else {
-                console.log(`[NPC Scale Match] ${sprite.texture?.key || 'unknown'}: Scale ${lockedScale} matches detective (NPC: ${displayH.toFixed(1)}px, Detective: ${detectiveDisplayH.toFixed(1)}px, diff: ${heightDiff.toFixed(1)}px)`);
+                console.log(`[NPC Scale Lock HARD-CODED] ${sprite.texture?.key || 'unknown'}: scale=${MANDATORY_NPC_SCALE}, displayH=${displayH.toFixed(1)}px`);
             }
             
             // Continue with rest of normalization (origin, body, etc.)
             sprite.setOrigin(0.5, 1.0);
             
-            // Compute display dimensions
+            // Compute display dimensions (use sprite.displayHeight if set, otherwise calculate)
             const displayW = frameW * sprite.scaleX;
-            const displayH_final = frameH * sprite.scaleY;
+            const displayH_final = sprite.displayHeight || (frameH * sprite.scaleY);
             
             // FEET COLLIDER (scale-safe)
             if (GameScene.ACTOR_BODY_USE_CIRCLE) {
@@ -3497,12 +3595,14 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
         }
 
         // Create HTML overlay - FORCE VISIBILITY
+        // Position: top-right, below minimap (minimap is 200px + 20px top margin, so quest tracker at 230px)
+        const { width } = this.scale;
         const questTrackerDOM = document.createElement('div');
         questTrackerDOM.id = 'dom-quest-tracker';
         questTrackerDOM.style.cssText = `
             position: fixed !important;
-            top: 20px !important;
-            left: 20px !important;
+            top: 230px !important;
+            right: 20px !important;
             width: 320px !important;
             min-height: 100px !important;
             background-color: rgba(0, 0, 0, 0.9) !important;
@@ -4245,6 +4345,32 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
             this.npcs.forEach(npc => {
                 if (!npc || !this.player) return;
                 
+                // MANDATORY FIX: Force debug text for NPC at [1536, 1619]
+                const targetX = 1536;
+                const targetY = 1619;
+                const tolerance = 5; // 5px tolerance
+                if (Math.abs(npc.x - targetX) < tolerance && Math.abs(npc.y - targetY) < tolerance) {
+                    // Force-create debug text for this specific NPC
+                    if (!this.npcInteractionPrompts.has(npc)) {
+                        const debugText = this.add.text(npc.x, npc.y - 50, 'PRESS [E] TO INTERROGATE', {
+                            fontFamily: 'Courier New, Courier, monospace',
+                            fontSize: '18px',
+                            color: '#ffff00', // Yellow for visibility
+                            backgroundColor: '#000000',
+                            padding: { x: 12, y: 8 },
+                            stroke: '#ff0000',
+                            strokeThickness: 4
+                        });
+                        debugText.setOrigin(0.5);
+                        debugText.setDepth(10004); // Even higher depth
+                        debugText.setScrollFactor(1);
+                        debugText.setVisible(true);
+                        debugText.setAlpha(1.0);
+                        this.npcInteractionPrompts.set(npc, debugText);
+                        console.log(`🔍 FORCED debug text for NPC at [${targetX}, ${targetY}]`);
+                    }
+                }
+                
                 const distance = Phaser.Math.Distance.Between(
                     this.player.x, this.player.y,
                     npc.x, npc.y
@@ -4287,10 +4413,13 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                         }
                     }
                 } else {
-                    // Hide prompt if too far
-                    const promptText = this.npcInteractionPrompts.get(npc);
-                    if (promptText) {
-                        promptText.setVisible(false);
+                    // Hide prompt if too far (unless it's the forced debug NPC)
+                    const isDebugNPC = Math.abs(npc.x - targetX) < tolerance && Math.abs(npc.y - targetY) < tolerance;
+                    if (!isDebugNPC) {
+                        const promptText = this.npcInteractionPrompts.get(npc);
+                        if (promptText) {
+                            promptText.setVisible(false);
+                        }
                     }
                 }
             });
@@ -4513,8 +4642,47 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                 // Bounds check for tile coordinates
                 if (tx >= 0 && ty >= 0 && tx < mapW && ty < (this.mapH || Math.floor(this.physics.world.bounds.height / th))) {
                     const idx = ty * mapW + tx;
+                    
+                    // ZERO-FAILURE: HARD-OVERRIDE LOGIC - collision_map.json takes ABSOLUTE precedence
+                    // This check MUST happen FIRST, before ANY tilemap collision checks
+                    const tileKey = `${tx},${ty}`;
+                    
+                    // Check both local subGridCollisionData and global CollisionData
+                    let collisionMapEntry = this.subGridCollisionData?.[tileKey];
+                    if (collisionMapEntry === undefined && typeof window !== 'undefined' && window.CollisionData) {
+                        collisionMapEntry = window.CollisionData[tileKey];
+                    }
+                    
+                    // CRITICAL: If tile exists in collision_map.json with mask 0x0000, RETURN FALSE (No Collision) immediately
+                    if (collisionMapEntry !== undefined) {
+                        let collisionMask;
+                        if (typeof collisionMapEntry === 'number') {
+                            collisionMask = collisionMapEntry;
+                        } else if (collisionMapEntry && typeof collisionMapEntry === 'object' && 'mask' in collisionMapEntry) {
+                            collisionMask = collisionMapEntry.mask;
+                        } else {
+                            collisionMask = 0x0000; // Default to walkable if format is invalid
+                        }
+                        
+                        // ZERO-FAILURE: If mask is 0x0000 (fully walkable), RETURN FALSE immediately - do NOT check Phaser tilemap
+                        if (collisionMask === 0x0000) {
+                            console.log(`[JSON OVERRIDE SUCCESS] Tile (${tx},${ty}) at world (${point.x.toFixed(1)},${point.y.toFixed(1)}) - mask=0x0000 - NO COLLISION`);
+                            continue; // Skip blocking, allow movement - DO NOT CHECK TILEMAP OR ANYTHING ELSE
+                        }
+                        // If mask exists but is not 0x0000, continue to sub-grid check below
+                    }
+                    
+                    // ADDITIONAL SAFETY: Staircase Zone coordinate range check (GHOST PROTOCOL)
+                    // World coordinates [1900-2050, 1000-1250] = Tiles (59-64, 31-39)
+                    const worldX = point.x;
+                    const worldY = point.y;
+                    if (worldX >= 1900 && worldX <= 2050 && worldY >= 1000 && worldY <= 1250) {
+                        // Staircase Zone - force walkable
+                        console.log(`[STAIRCASE ZONE OVERRIDE] World (${worldX.toFixed(1)},${worldY.toFixed(1)}) in Staircase Zone - NO COLLISION`);
+                        continue; // Skip blocking, allow movement
+                    }
 
-                    // Check 32px tile collision first
+                    // Check 32px tile collision (only if tile NOT in collision_map.json or mask != 0x0000)
                     if (this.blockedTiles[idx] === 1) {
                         // Shadow Culling: Check if this tile is ONLY in shadow layers
                         let isShadowOnly = false;
@@ -4542,7 +4710,11 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                         if (!isShadowOnly) {
                             // Check sub-grid bitmask from collision_map.json
                             const tileKey = `${tx},${ty}`;
-                            const subGridEntry = this.subGridCollisionData?.[tileKey];
+                            // Check both local and global collision data
+                            let subGridEntry = this.subGridCollisionData?.[tileKey];
+                            if (subGridEntry === undefined && typeof window !== 'undefined' && window.CollisionData) {
+                                subGridEntry = window.CollisionData[tileKey];
+                            }
                             
                             if (subGridEntry !== undefined) {
                                 // Handle both formats: number (legacy) or object { mask, alpha_threshold_passed }
@@ -4587,6 +4759,20 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                                 continue; // Skip blocking, allow movement
                             }
                             
+                            // MANDATORY FIX: Staircase Override for building entrance [1952-1984, 1056-1184]
+                            // Main staircase coordinates - cleared for player passage to building entrance
+                            const staircaseMinX = 1952;
+                            const staircaseMaxX = 1984;
+                            const staircaseMinY = 1056;
+                            const staircaseMaxY = 1184;
+                            
+                            if (worldX >= staircaseMinX && worldX <= staircaseMaxX &&
+                                worldY >= staircaseMinY && worldY <= staircaseMaxY) {
+                                // Staircase override: This coordinate range is walkable
+                                console.log(`[TILE GUARD OVERRIDE] Staircase coordinate (${worldX.toFixed(1)}, ${worldY.toFixed(1)}) manually overridden - Building entrance path validated`);
+                                continue; // Skip blocking, allow movement
+                            }
+                            
                             // Also check PATHFINDING_ANALYSIS.md validation
                             const pathfindingAnalysisValid = this.isCoordinateInPath(tx, ty);
                             if (pathfindingAnalysisValid) {
@@ -4610,6 +4796,34 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
                 // Collision detected - rollback
                 if (this.lastSafePos) {
                     const { tx, ty } = blockedTileCoords;
+                    
+                    // FINAL CHECK: Verify tile is NOT in collision_map.json before rolling back
+                    const tileKey = `${tx},${ty}`;
+                    let finalCheckEntry = this.subGridCollisionData?.[tileKey];
+                    if (finalCheckEntry === undefined && typeof window !== 'undefined' && window.CollisionData) {
+                        finalCheckEntry = window.CollisionData[tileKey];
+                    }
+                    
+                    if (finalCheckEntry !== undefined) {
+                        let finalMask;
+                        if (typeof finalCheckEntry === 'number') {
+                            finalMask = finalCheckEntry;
+                        } else if (finalCheckEntry && typeof finalCheckEntry === 'object' && 'mask' in finalCheckEntry) {
+                            finalMask = finalCheckEntry.mask;
+                        }
+                        
+                        // If mask is 0x0000, DO NOT rollback - allow movement
+                        if (finalMask === 0x0000) {
+                            console.log(`[TILE GUARD FINAL CHECK] Tile (${tx},${ty}) is walkable per collision_map.json - preventing rollback`);
+                            blockedPointFound = false;
+                            blockedTileCoords = null;
+                            // Update last safe position to current position
+                            if (!this.lastSafePos) this.lastSafePos = new Phaser.Math.Vector2();
+                            this.lastSafePos.set(this.player.x, this.player.y);
+                            return; // Exit early, no rollback needed
+                        }
+                    }
+                    
                     console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty} (sub-grid bitmask check). Rolling back to ${truncate(this.lastSafePos.x)},${truncate(this.lastSafePos.y)}.`);
                     
                     this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);

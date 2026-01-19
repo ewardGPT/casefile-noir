@@ -40,5 +40,281 @@
     "sync": "This file is synced with COLOR_MANIFEST.js collision logic via getTileCollision() function. Agent 3 can dynamically update bitmasks to reflect only opaque pixels based on alpha threshold detection. Use generateCollisionMask() and generateCollisionEntry() helpers to populate collisionData. Note: This file should be copied/synced to public/data/collision_map.json for Phaser loader access.",
     "persistence": "Tight boundaries are persisted to prevent detective from bouncing off invisible transparent pixels after reload"
   },
-  "collisionData": {}
+  "collisionData": {
+    "51,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase approach tile - fully walkable (cleared for player access)"
+    },
+    "59,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "59,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "60,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable) - CLOCK TILE"
+    },
+    "61,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "61,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "62,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "63,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,31": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,32": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,33": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,34": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,35": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,36": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,37": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,38": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    },
+    "64,39": {
+      "mask": 0,
+      "alpha_threshold_passed": true,
+      "description": "Staircase Zone - GHOST PROTOCOL (100% walkable)"
+    }
+  }
 }

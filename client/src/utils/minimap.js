@@ -6,7 +6,7 @@
 export class Minimap {
     constructor(scene) {
         this.scene = scene;
-        this.enabled = false;
+        this.enabled = true; // Always visible by default
         this.fullMap = false;
 
         // Minimap camera
@@ -47,7 +47,7 @@ export class Minimap {
         this.minimapCamera.setZoom(this.scale);
         this.minimapCamera.setScroll(0, 0);
         this.minimapCamera.setBackgroundColor(0x1a1a1a);
-        this.minimapCamera.setVisible(false); // Hidden by default
+        this.minimapCamera.setVisible(this.enabled); // Use enabled state
 
         // Create border panel UI
         this.minimapBorder = this.scene.add.rectangle(
@@ -67,7 +67,7 @@ export class Minimap {
         this.playerDot = this.scene.add.circle(0, 0, 4, 0xff0000, 1);
         this.playerDot.setScrollFactor(0);
         this.playerDot.setDepth(1002);
-        this.playerDot.setVisible(false);
+        this.playerDot.setVisible(this.enabled);
 
         // Create quest target marker (Yellow/Gold)
         this.questDot = this.scene.add.circle(0, 0, 6, 0xffd700, 1);
