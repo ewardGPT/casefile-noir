@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build",
+        "build": "tsc && vite build",
         "preview": "vite preview",
         "predev": "node ../scripts/generate-manifest.js",
         "qa": "npm run qa:health && npm run qa:assets && npm run qa:map && npm run qa:scenes && npm run qa:npcs",
@@ -17,7 +17,9 @@
         "qa:build": "vite build"
     },
     "devDependencies": {
-        "vite": "^5.0.0"
+        "vite": "^5.0.0",
+        "typescript": "^5.6.0",
+        "@types/node": "^22.0.0"
     },
     "dependencies": {
         "phaser": "^3.90.0"

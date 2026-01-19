@@ -1,10 +1,11 @@
+import os
 import pygame
 import sys
 from google import genai 
 
 # --- 1. CONFIGURATION ---
-# I saw your key in the screenshot. Paste it here again safely.
-API_KEY = "AIzaSyA758nCK50kFrzh4-_DTQZpWUDdUsRhOSE"
+# Use environment variable if available, otherwise fallback to placeholder
+API_KEY = os.getenv("GEMINI_API_KEY", "PASTE_YOUR_API_KEY_HERE")
 
 class Config:
     # Gameboy Palette

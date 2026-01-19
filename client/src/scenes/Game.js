@@ -17,6 +17,8 @@ import { AStarPathfinder } from '../utils/astarPathfinding.js';
 import { NPCController } from '../utils/npcController.js';
 import { AudioManager } from '../utils/audioManager.js';
 import { DayNightCycle } from '../utils/dayNightCycle.js';
+import { GuideSystem } from '../utils/GuideSystem.js';
+import { StoryData } from '../story/storyData.js';
 // Minimap - use dynamic import to handle old builds gracefully
 // import { Minimap } from '../utils/minimap.js'; // Commented out - using dynamic import instead
 import Phaser from 'phaser';
@@ -26,7 +28,7 @@ export default class GameScene extends Phaser.Scene {
     static PLAYER_SPEED = 160;
     static PLAYER_SPRINT_MULTIPLIER = 1.3;
     static AXIS_LOCKED = false; // If true, prevents diagonal movement (only one axis at a time)
-    
+
     // Unified Actor Body Constants (Player + NPCs)
     // Based on 64x64 sprite frames (verified in Boot.js)
     // Feet-only collision for smooth corner sliding
@@ -34,19 +36,19 @@ export default class GameScene extends Phaser.Scene {
     static ACTOR_FRAME_H = 64;
     static ACTOR_SCALE = 1.0;
     static ACTOR_TARGET_DISPLAY_HEIGHT = 64; // Target on-screen height in pixels (normalized)
-    
+
     // Rectangular body: small, feet-only (14x10px for tight feel)
     static ACTOR_BODY_W = 14;
     static ACTOR_BODY_H = 10;
     static ACTOR_BODY_OFFSET_X = 25; // (64 - 14) / 2 = 25 (centered horizontally)
     static ACTOR_BODY_OFFSET_Y = 54; // 64 - 10 = 54 (at bottom, feet-only)
-    
+
     // Circular body: alternative for smoother corner sliding (radius = 7px)
     static ACTOR_BODY_USE_CIRCLE = true; // Set to false to use rectangle only
     static ACTOR_BODY_CIRCLE_RADIUS = 7;
     static ACTOR_BODY_CIRCLE_OFFSET_X = 32; // Center of 64px frame
     static ACTOR_BODY_CIRCLE_OFFSET_Y = 57; // Slightly above bottom for feet
-    
+
     // Legacy NPC constants (deprecated - use ACTOR_* constants instead)
     static NPC_SCALE = 1.0;
     static NPC_FRAME_W = 64; // Updated from 32 to match actual frame size
@@ -128,28 +130,28 @@ export default class GameScene extends Phaser.Scene {
             map = this.make.tilemap({ key: 'city_map' });
             this.map = map;
             console.log("Game.create: Tilemap created successfully. Layers found:", map.layers.map(l => l.name));
-            
+
             // Get all layers with their types
             const allLayers = map.layers || [];
             const tileLayerNames = allLayers.filter(l => l.type === 'tilelayer').map(l => l.name);
             const objectLayerNames = allLayers.filter(l => l.type === 'objectgroup').map(l => l.name);
-            
+
             // Log layer information
             console.log(`📊 Map Layers Summary: ${allLayers.length} total layers`);
             console.log(`   Tile layers (${tileLayerNames.length}):`, tileLayerNames);
             console.log(`   Object layers (${objectLayerNames.length}):`, objectLayerNames.length > 0 ? objectLayerNames : '(none)');
-            
+
             // Helper function to find object layer with case-insensitive and partial matching
             const findObjectLayer = (targetName) => {
                 const loweredTarget = targetName.toLowerCase();
-                
+
                 // First try exact match (case-insensitive)
                 for (const layer of allLayers) {
                     if (layer.type === 'objectgroup' && layer.name.toLowerCase() === loweredTarget) {
                         return layer;
                     }
                 }
-                
+
                 // Then try partial match (contains)
                 for (const layer of allLayers) {
                     if (layer.type === 'objectgroup' && layer.name.toLowerCase().includes(loweredTarget)) {
@@ -157,7 +159,7 @@ export default class GameScene extends Phaser.Scene {
                         return layer;
                     }
                 }
-                
+
                 // Find closest matches for logging
                 const scored = objectLayerNames.map((name) => {
                     const lower = name.toLowerCase();
@@ -171,17 +173,17 @@ export default class GameScene extends Phaser.Scene {
                     return { name, score };
                 });
                 const closest = scored.sort((a, b) => b.score - a.score).slice(0, 3).map((item) => item.name);
-                
+
                 if (objectLayerNames.length > 0) {
                     console.warn(`   ⚠️ No object layer matching "${targetName}". Closest matches:`, closest);
                 }
-                
+
                 return null;
             };
 
             // Store findObjectLayer helper for use throughout create()
             this.findObjectLayer = findObjectLayer;
-            
+
             const npcLayer = findObjectLayer('NPCs');
             if (!npcLayer) {
                 if (objectLayerNames.length === 0) {
@@ -260,7 +262,7 @@ export default class GameScene extends Phaser.Scene {
             // Dynamically load all layers from the map (visual layers only)
             map.layers.forEach(layerData => {
                 const name = layerData.name;
-                
+
                 // Skip collision layers - they're handled separately
                 if (name === 'Blocked') {
                     return; // Skip - handled as collision source
@@ -275,10 +277,10 @@ export default class GameScene extends Phaser.Scene {
                 const layer = map.createLayer(name, tilesets, 0, 0);
                 if (layer) {
                     this.layers[name] = layer;
-                    
+
                     // Visual layers have NO collision - collision comes from dedicated source only
                     console.log(`Game.create: Visual layer ${name} (no collision)`);
-                    
+
                     // Set depth high for "overhead" layers like Roofs
                     if (name.includes('Roof') || name.includes('Top')) {
                         layer.setDepth(15);
@@ -325,13 +327,13 @@ export default class GameScene extends Phaser.Scene {
         this.collisionDebugGraphics = null;
         this.mergedCollisionRectangles = null; // Store merged rectangles for debug visualization
         this.showIndividualTilesDebug = false; // Toggle to show individual tiles (yellow) vs merged (magenta)
-        
+
         // CRITICAL: Map and layers must NEVER be scaled (scale = 1.0 always)
         // - Tilemap objects don't have setScale() method
         // - Layer scaling breaks collision alignment (physics bodies don't scale with visual layers)
         // - Use camera zoom (this.cameras.main.setZoom()) for visual scaling only
         // - All layers are created with default scale 1.0 via map.createLayer(name, tilesets, 0, 0)
-        
+
         // STEP 1: Print all layer names/types and choose best collision source
         console.log('\n═══════════════════════════════════════════════════════════');
         console.log('🔍 COLLISION SOURCE DETECTION');
@@ -340,7 +342,7 @@ export default class GameScene extends Phaser.Scene {
         map.layers.forEach((layer, idx) => {
             console.log(`  ${idx + 1}. "${layer.name}" (type: ${layer.type})`);
         });
-        
+
         // Priority 1: Object layer named "Collisions" (or close match)
         const collisionObjectLayerAliases = ['Collisions', 'collisions', 'Collision', 'collision', 'Walls', 'walls', 'Obstacles', 'obstacles'];
         let collisionsObjectLayer = null;
@@ -351,7 +353,7 @@ export default class GameScene extends Phaser.Scene {
                 break;
             }
         }
-        
+
         // Priority 2: Tile layer named "Collision/Collide/Blocked" (or close match)
         const collisionTileLayerAliases = ['Collision', 'collision', 'Collide', 'collide', 'Blocked', 'blocked', 'Collisions', 'collisions'];
         let collisionTileLayer = null;
@@ -362,12 +364,12 @@ export default class GameScene extends Phaser.Scene {
                 break;
             }
         }
-        
+
         // Choose collision source based on priority
         let collisionSource = null;
         let collisionSourceType = null;
         let collisionSourceName = null;
-        
+
         if (collisionsObjectLayer) {
             collisionSource = collisionsObjectLayer;
             collisionSourceType = 'object';
@@ -385,25 +387,25 @@ export default class GameScene extends Phaser.Scene {
             console.log(`\n⚠️  No collision layer found. Using fallback: feet-area collisions from visual layers (Priority 3)`);
         }
         console.log('═══════════════════════════════════════════════════════════\n');
-        
+
         // Handle collision source based on priority
         this.collisionSourceType = collisionSourceType;
         this.collisionSourceName = collisionSourceName;
         let colliderCount = 0;
-        
+
         if (collisionSourceType === 'object') {
             // Priority 1: Object layer - create static bodies from rectangles/polygons
             this.walls = this.physics.add.staticGroup();
             const tileW = map.tileWidth || 32;
             const tileH = map.tileHeight || 32;
-            
+
             if (collisionsObjectLayer && collisionsObjectLayer.objects) {
                 let polygonCount = 0;
                 let rectangleCount = 0;
-                
+
                 collisionsObjectLayer.objects.forEach((obj, idx) => {
                     let x, y, w, h;
-                    
+
                     // Handle polygons: approximate using bounding box
                     if (obj.polygon && obj.polygon.length > 0) {
                         polygonCount++;
@@ -430,15 +432,15 @@ export default class GameScene extends Phaser.Scene {
                     } else {
                         return; // Skip invalid objects
                     }
-                    
+
                     // Create static body
-                    const wall = this.add.rectangle(x + w/2, y + h/2, w, h, 0xff0000, 0); // Invisible
+                    const wall = this.add.rectangle(x + w / 2, y + h / 2, w, h, 0xff0000, 0); // Invisible
                     this.physics.add.existing(wall, true); // true = static
                     this.walls.add(wall);
                     this.collisionObjects.push({ x, y, w, h, obj, source: 'object' });
                     colliderCount++;
                 });
-                
+
                 console.log(`✅ Collision (ObjectLayer): ${colliderCount} static bodies from "${collisionSourceName}"`);
                 if (polygonCount > 0) {
                     console.log(`   ${polygonCount} polygons (approximated as bounding boxes), ${rectangleCount} rectangles`);
@@ -448,13 +450,13 @@ export default class GameScene extends Phaser.Scene {
             // Priority 2: Tile layer - use setCollisionByProperty or setCollisionByExclusion
             this.walls = this.physics.add.staticGroup();
             const collisionLayer = map.createLayer(collisionSourceName, tilesets, 0, 0);
-            
+
             if (collisionLayer) {
                 // Try setCollisionByProperty first (tiles with collides=true property)
                 let tilesWithCollision = 0;
                 const mapW = map.width;
                 const mapH = map.height;
-                
+
                 // Check if any tiles have collides property
                 for (let ty = 0; ty < mapH; ty++) {
                     for (let tx = 0; tx < mapW; tx++) {
@@ -464,27 +466,86 @@ export default class GameScene extends Phaser.Scene {
                         }
                     }
                 }
-                
+
                 if (tilesWithCollision > 0) {
                     // Use setCollisionByProperty for tiles with collides=true
                     collisionLayer.setCollisionByProperty({ collides: true });
                     console.log(`✅ Collision (TileLayer): Using setCollisionByProperty({ collides: true })`);
-                    console.log(`   ${tilesWithCollision} tiles marked as collidable`);
+
+                    // Make stairs walkable by removing collision from stair tiles
+                    let stairsMadeWalkable = 0;
+                    for (let ty = 0; ty < mapH; ty++) {
+                        for (let tx = 0; tx < mapW; tx++) {
+                            const tile = collisionLayer.getTileAt(tx, ty);
+                            if (tile && tile.collides) {
+                                // Check if tile is a stair (by property or name)
+                                const props = tile.properties || [];
+                                const isStair = props.some(p =>
+                                    (p.name === 'stair' || p.name === 'stairs' || p.name === 'step' || p.name === 'steps') && p.value === true
+                                ) || props.some(p =>
+                                    (p.name && (p.name.toLowerCase().includes('stair') || p.name.toLowerCase().includes('step')))
+                                );
+
+                                // Also check if this is near known stair coordinates (61,37)
+                                const nearStairs = (tx >= 59 && tx <= 63 && ty >= 35 && ty <= 39);
+
+                                if (isStair || nearStairs) {
+                                    tile.setCollision(false);
+                                    stairsMadeWalkable++;
+                                    if (nearStairs) {
+                                        console.log(`   ✅ Made stair tile walkable at (${tx},${ty}) - index: ${tile.index}, props:`, props);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (stairsMadeWalkable > 0) {
+                        console.log(`   ✅ Made ${stairsMadeWalkable} stair tiles walkable`);
+                    }
+
+                    console.log(`   ${tilesWithCollision - stairsMadeWalkable} tiles marked as collidable`);
                     this.collidableLayers.push(collisionLayer);
-                    colliderCount = tilesWithCollision;
+                    colliderCount = tilesWithCollision - stairsMadeWalkable;
                 } else {
                     // Try setCollisionByExclusion (all tiles except empty/transparent)
                     collisionLayer.setCollisionByExclusion([-1, 0]);
                     console.log(`✅ Collision (TileLayer): Using setCollisionByExclusion([-1, 0])`);
-                    // Count non-empty tiles
+
+                    // Make stairs walkable by removing collision from stair tiles
+                    let stairsMadeWalkable = 0;
                     for (let ty = 0; ty < mapH; ty++) {
                         for (let tx = 0; tx < mapW; tx++) {
                             const tile = collisionLayer.getTileAt(tx, ty);
-                            if (tile && tile.index !== -1 && tile.index !== 0) {
-                                colliderCount++;
+                            if (tile && tile.collides && tile.index !== -1 && tile.index !== 0) {
+                                // Check if tile is a stair (by property or name)
+                                const props = tile.properties || [];
+                                const isStair = props.some(p =>
+                                    (p.name === 'stair' || p.name === 'stairs' || p.name === 'step' || p.name === 'steps') && p.value === true
+                                ) || props.some(p =>
+                                    (p.name && (p.name.toLowerCase().includes('stair') || p.name.toLowerCase().includes('step')))
+                                );
+
+                                // Also check if this is near known stair coordinates (61,37)
+                                const nearStairs = (tx >= 59 && tx <= 63 && ty >= 35 && ty <= 39);
+
+                                if (isStair || nearStairs) {
+                                    tile.setCollision(false);
+                                    stairsMadeWalkable++;
+                                    if (nearStairs) {
+                                        console.log(`   ✅ Made stair tile walkable at (${tx},${ty}) - index: ${tile.index}, props:`, props);
+                                    }
+                                } else {
+                                    colliderCount++;
+                                }
                             }
                         }
                     }
+
+                    if (stairsMadeWalkable > 0) {
+                        console.log(`   ✅ Made ${stairsMadeWalkable} stair tiles walkable`);
+                    }
+
                     console.log(`   ${colliderCount} tiles marked as collidable`);
                     this.collidableLayers.push(collisionLayer);
                 }
@@ -494,16 +555,16 @@ export default class GameScene extends Phaser.Scene {
             this.walls = this.physics.add.staticGroup();
             const tileW = map.tileWidth || 32;
             const tileH = map.tileHeight || 32;
-            
+
             // Find building/decoration layers (Bldg_*, etc.) for feet-area collisions
-            const visualLayers = map.layers.filter(l => 
-                l.type === 'tilelayer' && 
+            const visualLayers = map.layers.filter(l =>
+                l.type === 'tilelayer' &&
                 (l.name.startsWith('Bldg_') || l.name.includes('Building') || l.name.includes('Deco'))
             );
-            
+
             if (visualLayers.length > 0) {
                 console.log(`⚠️  Fallback: Creating feet-area collisions from ${visualLayers.length} visual layer(s)`);
-                
+
                 visualLayers.forEach(layerData => {
                     // Reuse existing layer instead of creating duplicate
                     const layer = this.layers[layerData.name];
@@ -516,13 +577,13 @@ export default class GameScene extends Phaser.Scene {
                     if (layer) {
                         const mapW = map.width;
                         const mapH = map.height;
-                        
+
                         // Create "feet area" collisions: shrink to bottom center of each tile
                         const feetAreaW = tileW * 0.5; // 50% of tile width
                         const feetAreaH = tileH * 0.35; // 35% of tile height (feet only)
                         const feetOffsetX = (tileW - feetAreaW) / 2; // Center horizontally
                         const feetOffsetY = tileH - feetAreaH; // At bottom
-                        
+
                         for (let ty = 0; ty < mapH; ty++) {
                             for (let tx = 0; tx < mapW; tx++) {
                                 const tile = layer.getTileAt(tx, ty);
@@ -530,12 +591,12 @@ export default class GameScene extends Phaser.Scene {
                                     // Create feet-area collision
                                     const x = tx * tileW + feetOffsetX;
                                     const y = ty * tileH + feetOffsetY;
-                                    const wall = this.add.rectangle(x + feetAreaW/2, y + feetAreaH/2, feetAreaW, feetAreaH, 0xff0000, 0);
+                                    const wall = this.add.rectangle(x + feetAreaW / 2, y + feetAreaH / 2, feetAreaW, feetAreaH, 0xff0000, 0);
                                     this.physics.add.existing(wall, true);
                                     this.walls.add(wall);
-                                    this.collisionObjects.push({ 
-                                        x, y, w: feetAreaW, h: feetAreaH, 
-                                        tx, ty, source: 'fallback-feet', layer: layerData.name 
+                                    this.collisionObjects.push({
+                                        x, y, w: feetAreaW, h: feetAreaH,
+                                        tx, ty, source: 'fallback-feet', layer: layerData.name
                                     });
                                     colliderCount++;
                                 }
@@ -543,20 +604,20 @@ export default class GameScene extends Phaser.Scene {
                         }
                     }
                 });
-                
+
                 console.log(`✅ Collision (Fallback): ${colliderCount} feet-area colliders from visual layers`);
             } else {
                 console.warn('⚠️  No visual layers found for fallback collisions. Collisions disabled.');
             }
         }
-        
+
         // Store collision stats for audit
         this.collisionStats = {
             sourceType: collisionSourceType,
             sourceName: collisionSourceName,
             colliderCount: colliderCount
         };
-        
+
         console.log(`\n📊 Collision Summary: ${colliderCount} colliders from ${collisionSourceType} source "${collisionSourceName}"\n`);
 
         // --- 3. Entities (Spawn Points) ---
@@ -573,9 +634,9 @@ export default class GameScene extends Phaser.Scene {
         // #region agent log
         const hasEntitiesLayer = !!entitiesLayer;
         const hasEntitiesObjects = entitiesLayer && entitiesLayer.objects && entitiesLayer.objects.length > 0;
-        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:652',message:'Entities layer check',data:{hasLayer:hasEntitiesLayer,hasObjects:hasEntitiesObjects,objectCount:entitiesLayer?.objects?.length||0,layerName:entitiesLayer?.name||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:652', message: 'Entities layer check', data: { hasLayer: hasEntitiesLayer, hasObjects: hasEntitiesObjects, objectCount: entitiesLayer?.objects?.length || 0, layerName: entitiesLayer?.name || 'none' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run2', hypothesisId: 'D' }) }).catch(() => { });
         // #endregion
-        
+
         if (hasEntitiesObjects) {
             // Find Player or PlayerSpawn object
             const playerSpawnObj = entitiesLayer.objects.find(obj =>
@@ -694,14 +755,14 @@ export default class GameScene extends Phaser.Scene {
         console.log(`✅ Player spawn: ${spawnSource}`);
         console.log(`   Pixel coords: (${spawnX.toFixed(2)}, ${spawnY.toFixed(2)})`);
         console.log(`   Tile coords: (${spawnTileX}, ${spawnTileY})`);
-        
+
         // Store player spawn tile for collision audit
         this.playerSpawnTile = { tx: spawnTileX, ty: spawnTileY };
 
         // Safety: Check detective texture exists before creating player
         // #region agent log
         const hasDetectiveTexture = this.textures.exists('detective');
-        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:392',message:'Player texture check',data:{hasTexture:hasDetectiveTexture,spawnX,spawnY},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:392', message: 'Player texture check', data: { hasTexture: hasDetectiveTexture, spawnX, spawnY }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
         // #endregion
         if (!hasDetectiveTexture) {
             console.error("❌ CRITICAL: 'detective' texture not found! Cannot create player.");
@@ -709,15 +770,15 @@ export default class GameScene extends Phaser.Scene {
             this.add.text(100, 100, "ERROR: Player texture missing", { fontSize: '24px', color: '#ff0000' });
             return; // Stop scene creation
         }
-        
+
         this.player = this.physics.add.sprite(spawnX, spawnY, 'detective');
-        
+
         // Normalize player sprite to consistent size (uses tile size from map)
         // tileW and tileH are already declared above (line 451-452)
         const playerDebug = this.normalizeCharacterSprite(this.player, tileW, tileH);
-        
+
         console.log(`[Player Normalized] key=${playerDebug.key}, frame=${playerDebug.frameW}x${playerDebug.frameH}, scale=${playerDebug.scale}, display=${playerDebug.displayW}x${playerDebug.displayH}, body=${playerDebug.bodyW}x${playerDebug.bodyH}, offset=(${playerDebug.bodyOffsetX},${playerDebug.bodyOffsetY}), origin=${playerDebug.origin}`);
-        
+
         this.player.setCollideWorldBounds(true);
         // Depth will be set by normalizeCharacterSprite (Y-sorting)
         this.lastSafePos = new Phaser.Math.Vector2(spawnX, spawnY); // INITIALIZE FIX
@@ -739,12 +800,42 @@ export default class GameScene extends Phaser.Scene {
         });
         this.physics.add.collider(this.player, this.walls);
 
+        // --- AI & Story Integration ---
+        this.registry.set('storyData', StoryData);
+        this.guideSystem = new GuideSystem(this);
+
+        // Guide Key (G)
+        this.input.keyboard.on('keydown-G', async () => {
+            // Visual feedback that we are thinking
+            const feedback = this.add.text(10, 100, "Intuition: Thinking...", {
+                font: "16px Courier", fill: "#00ff00", backgroundColor: "#000000"
+            }).setScrollFactor(0).setDepth(2000);
+
+            const hint = await this.guideSystem.askForHint();
+            feedback.destroy();
+
+            // Show hint
+            const hintText = this.add.text(400, 500, `INTUITION: ${hint}`, {
+                font: "18px Courier",
+                fill: "#ffffff",
+                backgroundColor: "#000000aa",
+                wordWrap: { width: 600, useAdvancedWrap: true },
+                padding: { x: 10, y: 10 }
+            }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(2000);
+
+            // Fade out
+            this.time.delayedCall(5000, () => {
+                hintText.destroy();
+            });
+        });
+
+
         // --- NPC Debug Markers + Spawn Probe ---
         const npcLayer = this.findObjectLayer ? this.findObjectLayer('NPCs') : map.getObjectLayer('NPCs');
         // #region agent log
         const hasNpcLayer = !!npcLayer;
         const hasNpcObjects = npcLayer && npcLayer.objects && npcLayer.objects.length > 0;
-        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:817',message:'NPC layer check',data:{hasLayer:hasNpcLayer,hasObjects:hasNpcObjects,objectCount:npcLayer?.objects?.length||0,layerName:npcLayer?.name||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:817', message: 'NPC layer check', data: { hasLayer: hasNpcLayer, hasObjects: hasNpcObjects, objectCount: npcLayer?.objects?.length || 0, layerName: npcLayer?.name || 'none' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run2', hypothesisId: 'D' }) }).catch(() => { });
         // #endregion
         if (hasNpcObjects) {
             npcLayer.objects.forEach((obj) => {
@@ -972,7 +1063,7 @@ export default class GameScene extends Phaser.Scene {
         // --- 8.7. Minimap System (STEP 6) ---
         // Safety: Use dynamic import to handle old builds that don't have Minimap
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:657',message:'Attempting to load Minimap dynamically',data:{scene:'Game'},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:657', message: 'Attempting to load Minimap dynamically', data: { scene: 'Game' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
         console.log('[DEBUG] Attempting to load Minimap dynamically');
         // #endregion
         this.minimap = null;
@@ -980,44 +1071,44 @@ export default class GameScene extends Phaser.Scene {
         (async () => {
             try {
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:664',message:'Starting dynamic import',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:664', message: 'Starting dynamic import', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
                 // #endregion
                 const minimapModule = await import('../utils/minimap.js');
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:666',message:'Minimap module loaded',data:{hasMinimap:!!minimapModule.Minimap,moduleKeys:Object.keys(minimapModule)},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
-                console.log('[DEBUG] Minimap module loaded', {hasMinimap: !!minimapModule.Minimap});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:666', message: 'Minimap module loaded', data: { hasMinimap: !!minimapModule.Minimap, moduleKeys: Object.keys(minimapModule) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
+                console.log('[DEBUG] Minimap module loaded', { hasMinimap: !!minimapModule.Minimap });
                 // #endregion
                 if (minimapModule && minimapModule.Minimap) {
                     try {
                         // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:670',message:'Creating Minimap instance',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:670', message: 'Creating Minimap instance', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
                         // #endregion
                         this.minimap = new minimapModule.Minimap(this);
                         this.minimap.init();
                         // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:673',message:'Minimap initialized successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:673', message: 'Minimap initialized successfully', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
                         console.log('[DEBUG] Minimap initialized successfully');
                         // #endregion
                     } catch (e) {
                         console.warn('Minimap initialization failed:', e);
                         // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:678',message:'Minimap init error',data:{error:e.message,stack:e.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
-                        console.log('[DEBUG] Minimap init error', {error: e.message});
+                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:678', message: 'Minimap init error', data: { error: e.message, stack: e.stack }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
+                        console.log('[DEBUG] Minimap init error', { error: e.message });
                         // #endregion
                         this.minimap = null;
                     }
                 } else {
                     console.warn('Minimap class not found in module');
                     // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:685',message:'Minimap class not in module',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
+                    fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:685', message: 'Minimap class not in module', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
                     console.log('[DEBUG] Minimap class not in module');
                     // #endregion
                 }
             } catch (e) {
                 console.warn('Minimap module not available in this build - minimap features disabled', e);
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:691',message:'Minimap module import failed',data:{error:e.message,stack:e.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'minimap-fix',hypothesisId:'A'})}).catch(()=>{});
-                console.log('[DEBUG] Minimap module import failed', {error: e.message});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:691', message: 'Minimap module import failed', data: { error: e.message, stack: e.stack }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'minimap-fix', hypothesisId: 'A' }) }).catch(() => { });
+                console.log('[DEBUG] Minimap module import failed', { error: e.message });
                 // #endregion
                 this.minimap = null;
             }
@@ -1044,7 +1135,7 @@ export default class GameScene extends Phaser.Scene {
             }
         };
         this.input.keyboard.on('keydown-F7', this.f7Handler);
-        
+
         // F9 toggle character body debug overlay (draws physics body rectangles)
         this.showBodyDebug = false;
         this.bodyDebugGraphics = null;
@@ -1072,7 +1163,7 @@ export default class GameScene extends Phaser.Scene {
         this.notebookUI = new NotebookUI();
         this.notebookUI.setAccuseHandler((suspectId) => this.handleAccuse(suspectId));
         this.evidenceModal = new EvidenceModal();
-        this.interrogationUI = new InterrogationUI();
+        this.interrogationUI = new InterrogationUI({ storyData: StoryData });
         this.demoPanel = new DemoPanel({
             onJump: (id) => this.jumpToSuspect(id),
             onAddEvidence: () => this.addAllEvidenceToNotebook(),
@@ -1105,7 +1196,7 @@ export default class GameScene extends Phaser.Scene {
         this.debugCollisionActive = false;
         this.f2Handler = () => {
             this.debugCollisionActive = !this.debugCollisionActive;
-            
+
             if (this.debugCollisionActive) {
                 // Show collision visualization
                 this.showCollisionDebug();
@@ -1127,21 +1218,21 @@ export default class GameScene extends Phaser.Scene {
                 }
                 console.log("🔴 F2: Collision debug OFF");
             }
-            
+
             // Also toggle map debug overlay if available
             if (debugData && this.mapDebugOverlay) {
                 this.mapDebugOverlay.toggle();
             }
         };
         this.input.keyboard.on("keydown-F2", this.f2Handler);
-        
+
         // F8: Run collision audit manually
         this.f8Handler = () => {
             console.log('🔍 Running collision audit...');
             this.runCollisionAudit();
         };
         this.input.keyboard.on("keydown-F8", this.f8Handler);
-        
+
         if (debugData) {
             this.mapDebugOverlay = new MapDebugOverlay(this, debugData);
         }
@@ -1161,7 +1252,7 @@ export default class GameScene extends Phaser.Scene {
         const tileH = map.tileHeight || 32;
         const mapW = map.width;
         const mapH = map.height;
-        
+
         // Build boolean grid of blocked tiles
         const blocked = [];
         for (let ty = 0; ty < mapH; ty++) {
@@ -1171,30 +1262,30 @@ export default class GameScene extends Phaser.Scene {
                 blocked[ty][tx] = (tile && tile.collides) ? true : false;
             }
         }
-        
+
         // Track which tiles have been merged
         const merged = [];
         for (let ty = 0; ty < mapH; ty++) {
             merged[ty] = new Array(mapW).fill(false);
         }
-        
+
         const rectangles = [];
-        
+
         // Scanline algorithm: find largest rectangles
         for (let ty = 0; ty < mapH; ty++) {
             for (let tx = 0; tx < mapW; tx++) {
                 // Skip if already merged or not blocked
                 if (merged[ty][tx] || !blocked[ty][tx]) continue;
-                
+
                 // Try to extend rectangle right and down
                 let maxW = 1;
                 let maxH = 1;
-                
+
                 // Find maximum width (extend right)
                 while (tx + maxW < mapW && blocked[ty][tx + maxW] && !merged[ty][tx + maxW]) {
                     maxW++;
                 }
-                
+
                 // Find maximum height (extend down) for this width
                 let canExtendDown = true;
                 while (canExtendDown && ty + maxH < mapH) {
@@ -1209,14 +1300,14 @@ export default class GameScene extends Phaser.Scene {
                         maxH++;
                     }
                 }
-                
+
                 // Mark tiles as merged
                 for (let y = ty; y < ty + maxH; y++) {
                     for (let x = tx; x < tx + maxW; x++) {
                         merged[y][x] = true;
                     }
                 }
-                
+
                 // Convert to pixel coordinates
                 rectangles.push({
                     x: tx * tileW,
@@ -1226,7 +1317,7 @@ export default class GameScene extends Phaser.Scene {
                 });
             }
         }
-        
+
         return rectangles;
     }
 
@@ -1254,23 +1345,23 @@ export default class GameScene extends Phaser.Scene {
             frameW = frame ? frame.width : 64;
             frameH = frame ? frame.height : 64;
         }
-        
+
         // Compute target visual height from tile size (tileHeight * 1.75 for good visibility)
         const TARGET_H = tileH * 1.75;
-        
+
         // Compute scale to reach target height (maintain aspect ratio)
         const scale = TARGET_H / frameH;
-        
+
         // Apply scale
         sprite.setScale(scale);
-        
+
         // Set origin to bottom center (feet at bottom)
         sprite.setOrigin(0.5, 1.0);
-        
+
         // Compute display dimensions
         const displayW = frameW * scale;
         const displayH = frameH * scale;
-        
+
         // --- FEET COLLIDER (scale-safe) ---
         // Use displayWidth/displayHeight to compute offsets that work with any scale
         if (GameScene.ACTOR_BODY_USE_CIRCLE) {
@@ -1291,10 +1382,10 @@ export default class GameScene extends Phaser.Scene {
                 sprite.displayHeight - h
             );
         }
-        
+
         // Set depth for Y-sorting (feet position)
         sprite.setDepth(Math.floor(sprite.y));
-        
+
         // Return debug info
         return {
             key: sprite.texture?.key || 'unknown',
@@ -1312,10 +1403,10 @@ export default class GameScene extends Phaser.Scene {
         const tileH = map.tileHeight || 32;
         const mapW = map.width;
         const mapH = map.height;
-        
+
         let microGapCount = 0;
         const gaps = [];
-        
+
         // Check each tile in the layer
         for (let ty = 0; ty < mapH; ty++) {
             for (let tx = 0; tx < mapW; tx++) {
@@ -1324,7 +1415,7 @@ export default class GameScene extends Phaser.Scene {
                     // Check if tile is properly aligned
                     const pixelX = tx * tileW;
                     const pixelY = ty * tileH;
-                    
+
                     // Check neighbors for gaps
                     const neighbors = [
                         { x: tx - 1, y: ty },
@@ -1332,7 +1423,7 @@ export default class GameScene extends Phaser.Scene {
                         { x: tx, y: ty - 1 },
                         { x: tx, y: ty + 1 }
                     ];
-                    
+
                     for (const n of neighbors) {
                         if (n.x >= 0 && n.x < mapW && n.y >= 0 && n.y < mapH) {
                             const neighborTile = layer.getTileAt(n.x, n.y);
@@ -1348,7 +1439,7 @@ export default class GameScene extends Phaser.Scene {
                 }
             }
         }
-        
+
         if (microGapCount > 0) {
             console.warn(`⚠️ Found ${microGapCount} potential micro gaps in collision layer`);
             if (gaps.length > 0) {
@@ -1358,7 +1449,7 @@ export default class GameScene extends Phaser.Scene {
             console.log('✅ No micro gaps detected in collision layer');
         }
     }
-    
+
     showCollisionDebug() {
         // Create or show collision debug graphics
         if (!this.collisionDebugGraphics) {
@@ -1366,10 +1457,10 @@ export default class GameScene extends Phaser.Scene {
             this.collisionDebugGraphics.setDepth(999998);
             this.collisionDebugGraphics.setScrollFactor(1);
         }
-        
+
         this.collisionDebugGraphics.clear();
         this.collisionDebugGraphics.visible = true;
-        
+
         // Draw merged rectangles (magenta) - primary visualization for tile-based collisions
         if (this.mergedCollisionRectangles && this.mergedCollisionRectangles.length > 0) {
             this.collisionDebugGraphics.lineStyle(2, 0xff00ff, 0.9); // Magenta for merged rectangles
@@ -1377,14 +1468,14 @@ export default class GameScene extends Phaser.Scene {
                 this.collisionDebugGraphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
             });
         }
-        
+
         // Optional: Draw individual blocked tiles for comparison (yellow, toggle with flag)
         if (this.showIndividualTilesDebug && this.collidableLayers && this.collidableLayers.length > 0) {
             this.collidableLayers.forEach(layer => {
                 const map = layer.tilemap;
                 const tileW = map.tileWidth || 32;
                 const tileH = map.tileHeight || 32;
-                
+
                 this.collisionDebugGraphics.lineStyle(1, 0xffff00, 0.5); // Yellow, semi-transparent
                 for (let ty = 0; ty < layer.height; ty++) {
                     for (let tx = 0; tx < layer.width; tx++) {
@@ -1398,7 +1489,7 @@ export default class GameScene extends Phaser.Scene {
                 }
             });
         }
-        
+
         // Draw object layer collisions (red rectangles) - from "Collisions" object layer
         if (this.collisionObjects && this.collisionObjects.length > 0) {
             this.collisionObjects.forEach(obj => {
@@ -1412,30 +1503,30 @@ export default class GameScene extends Phaser.Scene {
             });
         }
     }
-    
+
     hideCollisionDebug() {
         if (this.collisionDebugGraphics) {
             this.collisionDebugGraphics.clear();
             this.collisionDebugGraphics.visible = false;
         }
     }
-    
+
     shutdown() {
         // Clean up collision debug graphics
         if (this.collisionDebugGraphics) {
             this.collisionDebugGraphics.destroy();
             this.collisionDebugGraphics = null;
         }
-        
+
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:703',message:'Game shutdown called',data:{hasInput:!!this.input,hasKeyboard:!!(this.input?.keyboard)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:703', message: 'Game shutdown called', data: { hasInput: !!this.input, hasKeyboard: !!(this.input?.keyboard) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
         // #endregion
         // Clean up keyboard listeners
         if (this.input && this.input.keyboard) {
             if (this.f2Handler) {
                 this.input.keyboard.off("keydown-F2", this.f2Handler);
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:707',message:'F2 handler removed',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:707', message: 'F2 handler removed', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
                 // #endregion
             }
             if (this.f3Handler) {
@@ -1453,13 +1544,13 @@ export default class GameScene extends Phaser.Scene {
             if (this.muteHandler) {
                 this.input.keyboard.off("keydown-K", this.muteHandler);
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:721',message:'Mute handler removed',data:{key:'K'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:721', message: 'Mute handler removed', data: { key: 'K' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
                 // #endregion
             }
             if (this.mHandler) {
                 this.input.keyboard.off("keydown-M", this.mHandler);
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:725',message:'M handler removed',data:{key:'M'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:725', message: 'M handler removed', data: { key: 'M' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
                 // #endregion
             }
             if (this.f7Handler) {
@@ -1575,7 +1666,7 @@ export default class GameScene extends Phaser.Scene {
             }
 
             let npcKey = this.resolveNpcTextureKey(npcTypes[i % npcTypes.length]);
-            
+
             // Validate spriteKey exists, fallback to npc_1 if missing
             if (!this.textures.exists(npcKey)) {
                 console.warn(`[NPC Fallback ${i}] Texture '${npcKey}' missing. Falling back to npc_1.`);
@@ -1585,16 +1676,16 @@ export default class GameScene extends Phaser.Scene {
                     continue;
                 }
             }
-            
+
             const npc = this.physics.add.sprite(sx, sy, npcKey);
-            
+
             // Normalize NPC sprite to consistent size (same as player)
             const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
             const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
             const npcDebug = this.normalizeCharacterSprite(npc, tileW, tileH);
-            
+
             console.log(`[NPC ${i} Normalized] key=${npcDebug.key}, frame=${npcDebug.frameW}x${npcDebug.frameH}, scale=${npcDebug.scale}, display=${npcDebug.displayW}x${npcDebug.displayH}, body=${npcDebug.bodyW}x${npcDebug.bodyH}, offset=(${npcDebug.bodyOffsetX},${npcDebug.bodyOffsetY}), origin=${npcDebug.origin}`);
-            
+
             npc.setPushable(true);
             npc.setCollideWorldBounds(true);
 
@@ -1625,7 +1716,7 @@ export default class GameScene extends Phaser.Scene {
     async spawnNPCs() {
         // Track spawn corrections across all spawn paths (declared first to avoid TDZ)
         let spawnCorrections = 0;
-        
+
         if (!this.mapLoaded) {
             console.warn("Game.spawnNPCs: Map not loaded yet.");
             return;
@@ -1642,10 +1733,10 @@ export default class GameScene extends Phaser.Scene {
             console.log(`Game.spawnNPCs: Using ${debugData.validatedNPCSpawns.length} validated NPC spawns from mapValidator.`);
             const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
             const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
-            
+
             debugData.validatedNPCSpawns.forEach((spawnData, idx) => {
                 let npcKey = this.resolveNpcTextureKey(spawnData.npcType || 'npc_1');
-                
+
                 // Validate spriteKey exists, fallback to npc_1 if missing
                 if (!this.textures.exists(npcKey)) {
                     console.warn(`[NPC Spawn ${idx}] Texture '${npcKey}' missing. Falling back to npc_1.`);
@@ -1655,19 +1746,19 @@ export default class GameScene extends Phaser.Scene {
                         return;
                     }
                 }
-                
+
                 const npc = this.physics.add.sprite(spawnData.x, spawnData.y, npcKey);
-                
+
                 // Normalize NPC sprite to consistent size (same as player)
                 const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
                 const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
                 const npcDebug = this.normalizeCharacterSprite(npc, tileW, tileH);
-                
+
                 console.log(`[NPC ${idx} Normalized] key=${npcDebug.key}, frame=${npcDebug.frameW}x${npcDebug.frameH}, scale=${npcDebug.scale}, display=${npcDebug.displayW}x${npcDebug.displayH}, body=${npcDebug.bodyW}x${npcDebug.bodyH}, offset=(${npcDebug.bodyOffsetX},${npcDebug.bodyOffsetY}), origin=${npcDebug.origin}`);
-                
+
                 npc.setPushable(true);
                 npc.setCollideWorldBounds(true);
-                
+
                 // Create controller with validated spawn position as home
                 const controller = new NPCController(this, npc, this.astar, {
                     speed: 40,
@@ -1678,26 +1769,26 @@ export default class GameScene extends Phaser.Scene {
                 });
                 npc.controller = controller;
                 npc.npcKey = npcKey;
-                
+
                 (this.collidableLayers || []).forEach((layer) => {
                     this.physics.add.collider(npc, layer);
                 });
                 this.physics.add.collider(npc, this.player);
-                
+
                 this.npcs.push(npc);
                 npc.setDepth(npc.y);
                 npc.setVisible(true);
                 npc.setAlpha(1);
                 controller.updateAnimation(0, 0);
             });
-            
+
             console.log(`Game.spawnNPCs: Successfully spawned ${this.npcs.length} NPCs from validated spawns.`);
             if (typeof spawnCorrections !== 'undefined' && spawnCorrections > 0) {
                 console.log(`   Spawn corrections: ${spawnCorrections} NPCs moved to valid positions`);
             }
             return;
         }
-        
+
         // Fallback: Try Tiled object layer "NPCs"
         const npcLayer = this.findObjectLayer ? this.findObjectLayer('NPCs') : this.map.getObjectLayer('NPCs');
         if (!npcLayer) {
@@ -1726,7 +1817,7 @@ export default class GameScene extends Phaser.Scene {
 
         // Track spawn positions and corrections
         const spawnedPositions = [];
-        
+
         npcLayer.objects.forEach((obj, idx) => {
             const center = getObjectCenter(obj);
             let sx = center.x;
@@ -1748,24 +1839,24 @@ export default class GameScene extends Phaser.Scene {
 
             // Comprehensive spawn validation (bounds, blocked, overlap)
             const validation = this.validateNPCSpawn(sx, sy, spawnedPositions, minTileDistance);
-            
+
             if (!validation.valid) {
                 // Try spiral search to find valid position in current zone
                 let corrected = this.findValidSpawnPositionSpiral(sx, sy, spawnedPositions, minTileDistance, 10);
-                
+
                 // If spiral search failed, try other NPC spawn zones
                 if (!corrected && npcLayer.objects.length > 1) {
                     console.log(`[NPC Spawn ${idx}] No valid position in original zone. Trying other zones...`);
-                    
+
                     // Try other NPC object positions as alternative zones
                     const otherZones = npcLayer.objects.filter((otherObj, otherIdx) => otherIdx !== idx);
                     for (const otherObj of otherZones) {
                         const otherCenter = getObjectCenter(otherObj);
                         corrected = this.findValidSpawnPositionSpiral(
-                            otherCenter.x, 
-                            otherCenter.y, 
-                            spawnedPositions, 
-                            minTileDistance, 
+                            otherCenter.x,
+                            otherCenter.y,
+                            spawnedPositions,
+                            minTileDistance,
                             15 // Larger radius for zone fallback
                         );
                         if (corrected) {
@@ -1774,7 +1865,7 @@ export default class GameScene extends Phaser.Scene {
                         }
                     }
                 }
-                
+
                 if (corrected) {
                     sx = corrected.x;
                     sy = corrected.y;
@@ -1806,7 +1897,7 @@ export default class GameScene extends Phaser.Scene {
                 console.error(`[NPC Spawn ${idx}] Texture '${npcKey}' does not exist. Skipping NPC.`);
                 return; // Skip this NPC
             }
-            
+
             // Create NPC sprite
             const npc = this.physics.add.sprite(sx, sy, npcKey);
 
@@ -1814,9 +1905,9 @@ export default class GameScene extends Phaser.Scene {
             const tileW = this.mapTileWidth || this.map?.tileWidth || 32;
             const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
             const npcDebug = this.normalizeCharacterSprite(npc, tileW, tileH);
-            
+
             console.log(`[NPC ${idx} Normalized] key=${npcDebug.key}, frame=${npcDebug.frameW}x${npcDebug.frameH}, scale=${npcDebug.scale}, display=${npcDebug.displayW}x${npcDebug.displayH}, body=${npcDebug.bodyW}x${npcDebug.bodyH}, origin=${npcDebug.origin}`);
-            
+
             npc.setPushable(true);
             npc.setCollideWorldBounds(true);
 
@@ -1842,7 +1933,7 @@ export default class GameScene extends Phaser.Scene {
                 this.physics.add.collider(npc, this.walls);
             }
             this.physics.add.collider(npc, this.player);
-            
+
             // Optional: NPC vs NPC collision (can be disabled for performance)
             // this.npcs.forEach(other => {
             //     if (other !== npc) {
@@ -1935,7 +2026,7 @@ export default class GameScene extends Phaser.Scene {
         const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
         const tx = Math.floor(x / tileW);
         const ty = Math.floor(y / tileH);
-        
+
         // Check 1: Inside world bounds
         if (!this.mapBounds) {
             return { valid: false, reason: 'Map bounds not initialized' };
@@ -1944,12 +2035,12 @@ export default class GameScene extends Phaser.Scene {
         if (x < 0 || y < 0 || x >= worldBounds.width || y >= worldBounds.height) {
             return { valid: false, reason: 'Outside world bounds' };
         }
-        
+
         // Check 2: Not in blocked tile
         if (this.isTileBlocked(tx, ty)) {
             return { valid: false, reason: 'Blocked tile' };
         }
-        
+
         // Check 3: Not overlapping another NPC (radius check)
         for (const pos of existingPositions) {
             const tileDist = Math.abs(pos.tx - tx) + Math.abs(pos.ty - ty); // Manhattan distance
@@ -1957,7 +2048,7 @@ export default class GameScene extends Phaser.Scene {
                 return { valid: false, reason: `Too close to NPC at (${pos.tx},${pos.ty})` };
             }
         }
-        
+
         return { valid: true };
     }
 
@@ -1975,7 +2066,7 @@ export default class GameScene extends Phaser.Scene {
         const tileH = this.mapTileHeight || this.map?.tileHeight || 32;
         const startTx = Math.floor(startX / tileW);
         const startTy = Math.floor(startY / tileH);
-        
+
         // Spiral search: check tiles in expanding rings
         for (let radius = 0; radius <= maxRadius; radius++) {
             // Check all tiles at this radius
@@ -1983,16 +2074,16 @@ export default class GameScene extends Phaser.Scene {
                 for (let dy = -radius; dy <= radius; dy++) {
                     // Only check tiles on the perimeter of this radius
                     if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
-                    
+
                     const tx = startTx + dx;
                     const ty = startTy + dy;
-                    
+
                     // Check bounds
                     if (tx < 0 || ty < 0 || tx >= this.mapW || ty >= this.mapH) continue;
-                    
+
                     // Check blocked
                     if (this.isTileBlocked(tx, ty)) continue;
-                    
+
                     // Check spacing
                     let hasProperSpacing = true;
                     for (const pos of existingPositions) {
@@ -2002,7 +2093,7 @@ export default class GameScene extends Phaser.Scene {
                             break;
                         }
                     }
-                    
+
                     if (hasProperSpacing) {
                         // Found valid position
                         const x = (tx * tileW) + (tileW / 2);
@@ -2012,7 +2103,7 @@ export default class GameScene extends Phaser.Scene {
                 }
             }
         }
-        
+
         return null;
     }
 
@@ -2069,7 +2160,42 @@ export default class GameScene extends Phaser.Scene {
     isTileBlocked(tx, ty) {
         if (!this.blockedTiles || !this.mapW) return false;
         if (tx < 0 || ty < 0 || tx >= this.mapW || ty >= this.mapH) return true;
-        return this.blockedTiles[ty * this.mapW + tx] === 1;
+
+        // Check if tile is blocked in the blocked tiles array
+        const isBlocked = this.blockedTiles[ty * this.mapW + tx] === 1;
+
+        // Special case: stairs at known coordinates (61,37 and surrounding area)
+        const nearStairs = (tx >= 59 && tx <= 63 && ty >= 35 && ty <= 39);
+        if (nearStairs) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:2129', message: 'Stair tile check', data: { tx: tx, ty: ty, isBlocked: isBlocked, nearStairs: nearStairs }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run3', hypothesisId: 'E' }) }).catch(() => { });
+            // #endregion
+            return false; // Stairs are always walkable
+        }
+
+        // If blocked, check if it's a stair (stairs should be walkable)
+        if (isBlocked && this.map) {
+            // Check all layers for stairs at this position
+            for (const layer of this.map.layers) {
+                if (layer.type === 'tilelayer') {
+                    const normalizedName = (layer.name || '').toLowerCase();
+                    // If this layer contains stairs, check if this tile is a stair
+                    if (normalizedName.includes('stair') || normalizedName.includes('step')) {
+                        // Try to get the tile from the layer
+                        const layerObj = this.layers[layer.name];
+                        if (layerObj) {
+                            const tile = layerObj.getTileAt(tx, ty);
+                            if (tile && tile.index !== -1 && tile.index !== 0) {
+                                // This is a stair tile, make it walkable
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return isBlocked;
     }
 
     findNearestWalkableTile(tx, ty) {
@@ -2357,7 +2483,7 @@ export default class GameScene extends Phaser.Scene {
         if (this.showBodyDebug && this.bodyDebugGraphics) {
             this.bodyDebugGraphics.clear();
             this.bodyDebugGraphics.lineStyle(2, 0x00ffff, 1.0); // Cyan for character bodies
-            
+
             // Draw player body
             if (this.player && this.player.body) {
                 const px = this.player.x;
@@ -2368,7 +2494,7 @@ export default class GameScene extends Phaser.Scene {
                 const offsetY = this.player.body.offset.y;
                 this.bodyDebugGraphics.strokeRect(px + offsetX, py + offsetY, w, h);
             }
-            
+
             // Draw NPC bodies
             if (this.npcs && this.npcs.length > 0) {
                 this.npcs.forEach(npc => {
@@ -2464,7 +2590,7 @@ export default class GameScene extends Phaser.Scene {
                     // We are ON a blocked tile! Rollback immediate.
                     if (this.lastSafePos) {
                         // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:2551',message:'Tile Guard blocked tile',data:{tx:tx,ty:ty,feetX:Math.round(feetX),feetY:Math.round(feetY),playerX:Math.round(this.player.x),playerY:Math.round(this.player.y),lastSafeX:Math.round(this.lastSafePos.x),lastSafeY:Math.round(this.lastSafePos.y),bodyType:GameScene.ACTOR_BODY_USE_CIRCLE?'circle':'rect'},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'C'})}).catch(()=>{});
+                        fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:2551', message: 'Tile Guard blocked tile', data: { tx: tx, ty: ty, feetX: Math.round(feetX), feetY: Math.round(feetY), playerX: Math.round(this.player.x), playerY: Math.round(this.player.y), lastSafeX: Math.round(this.lastSafePos.x), lastSafeY: Math.round(this.lastSafePos.y), bodyType: GameScene.ACTOR_BODY_USE_CIRCLE ? 'circle' : 'rect' }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run2', hypothesisId: 'C' }) }).catch(() => { });
                         // #endregion
                         console.warn(`[TILE GUARD] Blocked tile detected at ${tx},${ty}. Rolling back to ${truncate(this.lastSafePos.x)},${truncate(this.lastSafePos.y)}.`);
                         this.player.setPosition(this.lastSafePos.x, this.lastSafePos.y);
@@ -2531,7 +2657,7 @@ export default class GameScene extends Phaser.Scene {
             // Compute input direction vector (dx, dy)
             let dx = 0;
             let dy = 0;
-            
+
             // Horizontal input (WASD + Arrow Keys)
             if (this.cursors.left.isDown || this.wasd.A.isDown) {
                 dx = -1;
@@ -2559,8 +2685,8 @@ export default class GameScene extends Phaser.Scene {
             // Check if moving
             const moving = dx !== 0 || dy !== 0;
             const isSprinting = this.cursors.shift.isDown;
-            const speed = isSprinting 
-                ? GameScene.PLAYER_SPEED * GameScene.PLAYER_SPRINT_MULTIPLIER 
+            const speed = isSprinting
+                ? GameScene.PLAYER_SPEED * GameScene.PLAYER_SPRINT_MULTIPLIER
                 : GameScene.PLAYER_SPEED;
 
             if (moving) {
@@ -2570,23 +2696,23 @@ export default class GameScene extends Phaser.Scene {
                 const inputMagnitude = Math.hypot(dx, dy); // Use Math.hypot for better precision
                 const normalizedDx = inputMagnitude > 0 ? dx / inputMagnitude : 0;
                 const normalizedDy = inputMagnitude > 0 ? dy / inputMagnitude : 0;
-                
+
                 // Compute velocity from normalized direction vector
                 const velocityX = normalizedDx * speed;
                 const velocityY = normalizedDy * speed;
-                
+
                 // Apply velocity to Arcade body
                 this.player.setVelocity(velocityX, velocityY);
-                
+
                 // Update animation based on direction (use normalized input direction)
                 this.updatePlayerAnimation(normalizedDx, normalizedDy, velocityX, velocityY, true);
-                
+
                 // Debug: Log speed magnitude to verify consistency
                 // #region agent log
                 const speedMagnitude = Math.hypot(velocityX, velocityY);
                 const isDiagonal = dx !== 0 && dy !== 0;
                 const movementType = isDiagonal ? 'diagonal' : 'straight';
-                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Game.js:2665',message:'Player movement speed',data:{speedMagnitude:Math.round(speedMagnitude),expectedSpeed:Math.round(speed),movementType:movementType,dx:dx,dy:dy,normalizedDx:normalizedDx.toFixed(3),normalizedDy:normalizedDy.toFixed(3),velocityX:Math.round(velocityX),velocityY:Math.round(velocityY)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/784270b1-5902-46b7-bc77-6b9c54b5c293', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'Game.js:2665', message: 'Player movement speed', data: { speedMagnitude: Math.round(speedMagnitude), expectedSpeed: Math.round(speed), movementType: movementType, dx: dx, dy: dy, normalizedDx: normalizedDx.toFixed(3), normalizedDy: normalizedDy.toFixed(3), velocityX: Math.round(velocityX), velocityY: Math.round(velocityY) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run2', hypothesisId: 'B' }) }).catch(() => { });
                 // #endregion
 
                 // Sprint trail effect (throttled to every 100ms)
@@ -2608,6 +2734,41 @@ export default class GameScene extends Phaser.Scene {
             // Tile Guard rolled back, ensure velocity is zero
             this.player.setVelocity(0, 0);
             this.updatePlayerAnimation(0, 0, 0, 0, false);
+        }
+
+        // NPC Interaction (Space)
+        if (Phaser.Input.Keyboard.JustDown(this.input.keyboard.addKey('SPACE'))) {
+            let nearest = null;
+            let minDst = 60; // 60px radius
+
+            if (this.npcs) {
+                this.npcs.forEach(npc => {
+                    const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, npc.x, npc.y);
+                    if (d < minDst) {
+                        minDst = d;
+                        nearest = npc;
+                    }
+                });
+            }
+
+            if (nearest) {
+                // Stop Player
+                this.player.setVelocity(0);
+
+                // Stop NPC
+                if (nearest.controller) nearest.controller.enterPause(5000);
+
+                // Trigger UI
+                const key = nearest.npcKey || "Unknown";
+                console.log("Interacting with NPC:", key);
+
+                // Generic mapping or direct key
+                this.interrogationUI.open({
+                    id: key,
+                    name: key,
+                    portrait: `assets/portraits/${key}.png`
+                });
+            }
         }
 
         // Interaction
@@ -2950,7 +3111,7 @@ export default class GameScene extends Phaser.Scene {
         console.log('\n═══════════════════════════════════════════════════════════');
         console.log('🔍 COLLISION AUDIT MODE');
         console.log('═══════════════════════════════════════════════════════════\n');
-        
+
         // Log collision source and stats
         if (this.collisionStats) {
             console.log('📊 Collision Source Information:');

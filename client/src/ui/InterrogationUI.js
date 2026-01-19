@@ -1,4 +1,5 @@
 import { interrogateSuspect, checkContradictions } from '../api.js';
+import { voiceService } from '../utils/VoiceService.js';
 import {
     addSuspectStatement,
     setContradictions,
@@ -12,6 +13,7 @@ const STYLE_ID = 'interrogation-ui-styles';
 export default class InterrogationUI {
     constructor(options = {}) {
         this.onClose = options.onClose;
+        this.storyData = options.storyData || {};
         this.isOpen = false;
         this.currentSuspect = null;
         this.container = this.createLayout();
@@ -61,9 +63,31 @@ export default class InterrogationUI {
 
         const inputWrap = document.createElement('div');
         inputWrap.className = 'interrogation-input';
+
+        // Mic Button
+        const micBtn = document.createElement('button');
+        micBtn.textContent = '🎤';
+        micBtn.className = 'mic-btn';
+        micBtn.style.marginRight = '8px';
+        micBtn.style.padding = '8px';
+        micBtn.onclick = async () => {
+            micBtn.style.color = 'red';
+            try {
+                const text = await voiceService.listen();
+                this.inputEl.value = text;
+                this.sendQuestion(text);
+            } catch (e) {
+                console.error(e);
+                this.appendLog(`Mic Error: ${e}`, 'system');
+            } finally {
+                micBtn.style.color = '';
+            }
+        };
+        inputWrap.appendChild(micBtn);
+
         this.inputEl = document.createElement('input');
         this.inputEl.type = 'text';
-        this.inputEl.placeholder = 'Type your question...';
+        this.inputEl.placeholder = 'Type or Speak your question...';
         inputWrap.appendChild(this.inputEl);
 
         panel.appendChild(header);
@@ -174,6 +198,15 @@ export default class InterrogationUI {
                 text-transform: uppercase;
                 letter-spacing: 0.8px;
             }
+            .mic-btn {
+                background: #3a2a2a;
+                border: 1px solid #7a4b4b;
+                color: #f4e9d4;
+                cursor: pointer;
+            }
+            .mic-btn:hover {
+                background: #4a3a3a;
+            }
         `;
         document.head.appendChild(style);
     }
@@ -238,13 +271,37 @@ export default class InterrogationUI {
         addTimelineEvent({ text: `Questioned ${this.currentSuspect.name}: ${question}` });
 
         try {
-            const response = await interrogateSuspect({
-                suspectId: this.currentSuspect.id,
-                question
-            });
-            const reply = (response && (response.reply || response.answer)) || '...';
+            // Prepare Story Context
+            const suspectName = this.currentSuspect.name;
+            const characterProfile = this.storyData.characters ? this.storyData.characters[suspectName] : null;
+            const dialogueInfo = this.storyData.dialogueTree ? this.storyData.dialogueTree[suspectName] : null;
+
+            const storyContext = {
+                profile: characterProfile,
+                knowledge: dialogueInfo,
+                globalMetadata: this.storyData.metadata
+            };
+
+            const payload = {
+                suspect: {
+                    name: this.currentSuspect.name,
+                    persona: characterProfile ? characterProfile.description : "Suspect in murder case",
+                    secret: characterProfile ? characterProfile.role : undefined
+                },
+                question: question,
+                previousStatements: [], // TODO: We should load these from gameState if we want full history context
+                evidence: [], // TODO: Pass relevant evidence if selected
+                storyContext: storyContext
+            };
+
+            const response = await interrogateSuspect(payload);
+            const reply = (response && (response.suspectReply || response.reply || response.answer)) || '...';
+
             addSuspectStatement(this.currentSuspect.id, this.currentSuspect.name, reply, 'Suspect');
             this.appendLog(`${this.currentSuspect.name}: ${reply}`, 'ai');
+
+            voiceService.speak(reply, this.currentSuspect.name);
+
             await this.refreshContradictions();
         } catch (error) {
             this.appendLog(`System: ${error.message}`, 'ai');

@@ -1,12 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Detective RPG</title>
-  <!-- Phaser is imported via ES modules, no CDN needed -->
-
+  <title>Detective RPG - Captive Horror</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
 
@@ -27,7 +24,6 @@
       box-shadow: none;
     }
 
-    /* NOIR FILTERS */
     .vignette {
       position: absolute;
       top: 0;
@@ -50,69 +46,14 @@
       pointer-events: none;
       z-index: 11;
     }
-
-    /* UI Overlays */
-    #ui-layer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Dialog Box (Bottom) */
-    .dialog-container {
-      margin-top: auto;
-      background: rgba(10, 10, 10, 0.9);
-      border-top: 2px solid #555;
-      padding: 20px;
-      min-height: 100px;
-      display: none;
-      pointer-events: auto;
-    }
-
-    .dialog-text {
-      font-size: 18px;
-      color: #ddd;
-    }
-
-    /* Interact Prompt */
-    .prompt {
-      position: absolute;
-      top: 40%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.8);
-      border: 1px solid white;
-      padding: 5px 10px;
-      font-size: 14px;
-      display: none;
-    }
   </style>
 </head>
-
 <body>
   <div id="game-container">
-    <!-- Phaser Canvas -->
     <div class="vignette"></div>
     <div class="film-grain"></div>
-
-    <div id="ui-layer">
-      <div id="interact-prompt" class="prompt">PRESS E</div>
-
-      <div id="dialog-box" class="dialog-container">
-        <div id="dialog-text" class="dialog-text">...</div>
-      </div>
-    </div>
   </div>
 
-  <!-- Main Game Logic -->
-  <!-- Vite will process this script and bundle Phaser from node_modules -->
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
-
 </html>

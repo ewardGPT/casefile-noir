@@ -14,3 +14,4 @@ const postJson = async (path, payload) => {
 export const analyzeEvidence = async (payload) => postJson('/api/evidence/analyze', payload);
 export const interrogateSuspect = async (payload) => postJson('/api/suspect/interrogate', payload);
 export const checkContradictions = async (payload) => postJson('/api/contradictions/check', payload);
+export const getGuideHint = async (payload) => postJson('/api/guide/hint', payload);
