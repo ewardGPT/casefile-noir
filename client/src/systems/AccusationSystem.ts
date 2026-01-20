@@ -145,6 +145,16 @@ export class AccusationSystem {
     this.container.setAlpha(0);
     this.container.setScale(0.8);
 
+    // Add ease-out scale and fade-in transitions (500ms duration)
+    this.scene.tweens.add({
+      targets: this.container,
+      alpha: { from: 0, to: 1 },
+      scaleX: { from: 0.8, to: 1 },
+      scaleY: { from: 0.8, to: 1 },
+      duration: 500,
+      ease: 'Power2'
+    });
+
     const bg = this.scene.add.rectangle(
       width / 2,
       height / 2,

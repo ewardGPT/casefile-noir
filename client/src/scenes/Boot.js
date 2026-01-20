@@ -149,6 +149,8 @@ export default class Boot extends Phaser.Scene {
         this.load.audio('typewriter_beep', 'assets/audio/sfx/typewriter_beep.ogg');
         this.load.audio('victory_fanfare', 'assets/audio/sfx/victory_fanfare.ogg');
         this.load.audio('failure_sound', 'assets/audio/sfx/failure_sound.ogg');
+        this.load.audio('footstep', 'assets/audio/sfx/footstep.ogg');
+        this.load.audio('interact', 'assets/audio/sfx/interact.ogg');
         
         // Note: NPC billboards are created dynamically using Phaser Graphics
         // (see NPC.js createBillboardNameplate method) - no external assets needed

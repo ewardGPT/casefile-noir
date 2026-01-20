@@ -22,6 +22,11 @@ import { AudioManager } from '../utils/audioManager.js';
 import { DayNightCycle } from '../utils/dayNightCycle.js';
 import { GuideSystem } from '../utils/GuideSystem.js';
 import { StoryData } from '../story/storyData.js';
+import { CutsceneManager } from '../systems/CutsceneManager.js';
+import { SaveLoadUI } from '../ui/SaveLoadUI.js';
+import { CutsceneManager } from '../systems/CutsceneManager.js';
+import { SaveLoadUI } from '../ui/SaveLoadUI.js';
+import { ParticleManager } from '../utils/ParticleManager.js';
 // Minimap - use dynamic import to handle old builds gracefully
 // import { Minimap } from '../utils/minimap.js'; // Commented out - using dynamic import instead
 import { QuestSystem } from '../utils/QuestSystem.js';
@@ -385,6 +390,20 @@ export default class GameScene extends Phaser.Scene {
             this.mapBounds = { width: mapWidth, height: mapHeight };
             console.log("Game.create: Bounds set to", mapWidth, mapHeight);
             this.mapLoaded = true;
+
+            // --- POST-PROCESSING SHADERS (NOIR ATMOSPHERE) ---
+            // Vignette overlay for cinematic framing
+            this.vignette = this.add.graphics();
+            this.vignette.setDepth(10000);
+            this.vignette.setScrollFactor(0);
+
+            // Film grain effect for vintage noir feel
+            this.filmGrain = this.add.graphics();
+            this.filmGrain.setDepth(10001);
+            this.filmGrain.setScrollFactor(0);
+
+            // Noir sepia tone adjustment
+            this.cameras.main.setTint(0xff6b4a, 1.0);
 
             // Initialize navigation logic
             if (this.questSystem && this.questSystem.activeQuest) {
@@ -1237,6 +1256,19 @@ export default class GameScene extends Phaser.Scene {
         };
         this.input.keyboard.on('keydown-F5', this.f5Handler);
 
+        // --- 8.6. Save/Load UI (STEP 4.5) ---
+        this.saveLoadUI = new SaveLoadUI(this);
+        this.input.keyboard.on('keydown-F5', () => {
+            if (!this.dialogueUI?.isVisible() && !this.cutsceneManager?.isPlaying()) {
+                this.saveLoadUI.showSaveMenu();
+            }
+        });
+        this.input.keyboard.on('keydown-F9', () => {
+            if (!this.dialogueUI?.isVisible() && !this.cutsceneManager?.isPlaying()) {
+                this.saveLoadUI.showLoadMenu();
+            }
+        });
+
         // Dev Health Check (F6)
         this.f6Handler = () => {
             this.debugHealthReport();
@@ -1267,6 +1299,9 @@ export default class GameScene extends Phaser.Scene {
                 rainSound.play();
             }
         }
+
+        // --- 8.6. Particle System (STEP 4.5) ---
+        this.particleManager = new ParticleManager(this);
 
         // K key to mute/unmute (Moved from M)
         this.muteHandler = () => {
@@ -1401,6 +1436,9 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
         });
         this.demoPanel.setSuspects(this.suspectCatalog);
         this.createEndingOverlay();
+
+        // --- 11. Cinematic Cutscenes ---
+        this.cutsceneManager = new CutsceneManager(this);
 
         // --- 10. Rain FX ---
         this.createRain();
@@ -4482,6 +4520,85 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
             this.dayNightCycle.update(delta);
         }
 
+        // STEP 5.1: Update post-processing effects (noir atmosphere)
+        if (this.vignette && this.filmGrain) {
+            const time = this.time.now;
+
+            // Flickering film grain effect (random variation)
+            if (time % 50 < 25) {
+                const grainIntensity = 0.03 + Math.random() * 0.02;
+                this.filmGrain.clear();
+                this.filmGrain.fillStyle(0x000000, grainIntensity);
+                this.filmGrain.fillRect(0, 0, this.scale.width, this.scale.height);
+            }
+
+            // Dynamic vignette intensity based on location
+            const targetVignetteIntensity = this.weatherManager.getWeatherForLocation(this.player.x, this.player.y);
+            this.vignette.clear();
+            this.vignette.fillStyle(0x000000, targetVignetteIntensity);
+            this.vignette.fillRect(0, 0, this.scale.width, this.scale.height);
+            this.vignette.fillCircle(
+                this.scale.width / 2,
+                this.scale.height / 2,
+                Math.max(this.scale.width, this.scale.height) / 2
+            );
+        }
+
+        // STEP 5: Update day/night cycle
+        if (this.dayNightCycle) {
+            this.dayNightCycle.update(delta);
+        }
+        if (this.dayNightCycle) {
+            this.dayNightCycle.update(delta);
+        }
+
+        // STEP 5.1: Update post-processing effects (noir atmosphere)
+        if (this.vignette && this.filmGrain) {
+            const time = this.time.now;
+
+            // Flickering film grain effect (random variation)
+            if (time % 50 < 25) {
+                const grainIntensity = 0.03 + Math.random() * 0.02;
+                this.filmGrain.clear();
+                this.filmGrain.fillStyle(0x000000, grainIntensity);
+                this.filmGrain.fillRect(0, 0, this.scale.width, this.scale.height);
+            }
+
+            // Dynamic vignette intensity based on location
+            const targetVignetteIntensity = this.getCurrentLocationVignetteIntensity();
+            this.vignette.clear();
+            this.vignette.fillStyle(0x000000, 0.85);
+            this.vignette.fillRect(0, 0, this.scale.width, this.scale.height);
+            this.vignette.fillCircle(
+                this.scale.width / 2,
+                this.scale.height / 2,
+                Math.max(this.scale.width, this.scale.height) / 2
+            );
+        }
+
+        // Helper method for location-based vignette
+        if (!this.getCurrentLocationVignetteIntensity) {
+            this.getCurrentLocationVignetteIntensity = () => {
+                const x = this.player ? this.player.x : 0;
+                const y = this.player ? this.player.y : 0;
+
+                // Location-based vignette intensity
+                if (x >= 1800 && x <= 2050 && y >= 1000 && y <= 1250) {
+                    return 0.95; // Staircase Zone - darker atmosphere
+                } else if (x >= 2000 && x <= 2400 && y >= 2200 && y <= 2600) {
+                    return 0.90; // Pennyworth Lane - moody fog
+                } else if (x >= 2800 && x <= 3200 && y >= 2000 && y <= 2400) {
+                    return 0.80; // Lions Den - clear but tense
+                } else if (x >= 1400 && x <= 1800 && y >= 1400 && y <= 1800) {
+                    return 0.92; // School Zone - balanced
+                } else if (x >= 2200 && x <= 2400 && y >= 2400 && y <= 2800) {
+                    return 0.88; // Harrow Residence - slightly darker
+                }
+
+                return 0.85; // Default - Police Station and open areas
+            };
+        }
+
         // STEP 6: Update minimap
         if (this.minimap) {
             this.minimap.update();
@@ -5071,7 +5188,8 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
         }
 
         // MANDATORY FIX: E key interaction handler - handles ALL interaction types
-        if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+        // Use same pattern as Space key for consistency
+        if (Phaser.Input.Keyboard.JustDown(this.input.keyboard.addKey('E'))) {
             console.log(`🔍 E key pressed! interactionTarget=${!!this.interactionTarget}, nearestNPC=${!!this.nearestNPC}, interactionType=${this.interactionType}`);
             
             // STEP 4: Play interact sound
@@ -5205,6 +5323,93 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
             if (!questItem) {
                 console.error(`Quest item ${data.id} not found in QUEST_ITEMS`);
                 return;
+            }
+            
+            // Add to evidence/inventory
+            const entry = {
+                id: questItem.id,
+                title: questItem.name,
+                description: questItem.description,
+                image: questItem.spriteKey,
+                metadata: {
+                    questPath: questItem.questPath,
+                    questObjective: questItem.questObjective,
+                    hexColor: questItem.hexColor
+                }
+            };
+            upsertEvidence(entry);
+            addTimelineEvent({ text: `Quest item collected: ${questItem.name}` });
+            
+            // ENHANCED: Particle burst effect (Zelda-style visual feedback)
+            const emitter = this.particleManager.createEvidenceBurst(
+                'quest_item', 
+                this.player.x, 
+                this.player.y - 30,
+                parseInt(questItem.hexColor.replace('#', '0x'))
+            );
+            
+            // ENHANCED: Float text animation (Zelda-style "+ ITEM NAME!" popup)
+            // Animate float text upward
+            this.tweens.add({
+                targets: floatText,
+                y: this.player.y - 100,
+                alpha: 0,
+                duration: 1000,
+                ease: 'Quad.easeOut',
+                onComplete: () => {
+                    emitter.destroy();
+                    floatText.destroy();
+                }
+            });
+
+            // ENHANCED: Trigger evidence discovery cutscene
+            this.cutsceneManager.playEvidenceDiscovery({
+                item: questItem,
+                x: this.player.x,
+                y: this.player.y
+            });
+
+            // Play Zelda-style item collection sound
+            if (this.audio) {
+                this.audio.playSfx('item_collect', { volume: 0.8 });
+            }
+            
+            // Open InterrogationUI with quest item context
+            this.interrogationUI.open({
+                id: questItem.id,
+                name: questItem.name,
+                portrait: `assets/portraits/${questItem.id}.png`,
+                questItem: true,
+                questPath: questItem.questPath,
+                questObjective: questItem.questObjective,
+                description: questItem.description
+            });
+            
+            // Complete quest objective
+            if (this.questSystem && questItem.questObjective) {
+                this.questSystem.checkQuestCompletion({
+                    type: 'quest_item_collected',
+                    id: questItem.id,
+                    objectiveId: questItem.questObjective
+                });
+            }
+            
+            // Refresh quest tracker UI to show updated objective
+            if (this.questTrackerUI) {
+                this.questTrackerUI.refresh();
+            }
+            
+            // Remove item from world (destroy interactable zone)
+            if (this.interactionTarget) {
+                // Remove visual indicator if it exists
+                const indicator = this.interactionTarget.getData('indicator');
+                if (indicator) {
+                    indicator.destroy();
+                }
+                this.interactionTarget.destroy();
+            }
+            
+            return;
             }
             
             // Add to evidence/inventory
@@ -5356,6 +5561,12 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
         const state = loadGameState();
         setBestScore(state.score);
         const updatedState = loadGameState();
+        
+        // ENHANCED: Trigger victory cutscene for correct accusations
+        if (correct && this.cutsceneManager) {
+            this.cutsceneManager.playCaseSolved();
+        }
+        
         this.showEndingOverlay({
             verdict: correct ? 'Case Closed' : 'Wrong Accusation',
             explanation: correct ? this.caseSolution.explanation : 'The trail does not support this suspect.',
@@ -5425,6 +5636,19 @@ this.questSystem.events.on('quest-update', (activeQuest) => {
     showEndingOverlay({ verdict, explanation, contradictions, score, bestScore }) {
         this.endingVisible = true;
         this.endingPanel.innerHTML = '';
+        
+        // Add smooth fade-in transition (500ms duration)
+        this.endingOverlay.className = 'ending-overlay';
+        this.endingOverlay.style.opacity = '0';
+        this.endingOverlay.style.transform = 'scale(0.9)';
+        this.endingOverlay.style.transition = 'opacity 500ms ease-out, transform 500ms ease-out';
+        
+        // Trigger transition after DOM update
+        setTimeout(() => {
+            this.endingOverlay.style.opacity = '1';
+            this.endingOverlay.style.transform = 'scale(1)';
+        }, 10);
+        
         const title = document.createElement('h2');
         title.textContent = verdict;
         this.endingPanel.appendChild(title);
